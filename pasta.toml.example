@@ -1,1 +1,4 @@
-RemoteHost = http://localhost:8199
+# Keep in mind to escape string. This is TOML not an ini file!
+# Place this file in ~/.pasta.toml
+
+RemoteHost = "http://localhost:8199"

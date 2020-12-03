@@ -10,6 +10,10 @@ Stupid simple pastebin service written in go
     make pasta                                     # Client
     make                                           # all
 
+Then create a `pastad.toml` file using the provided example (`pastad.toml.example`) and run the server with
+
+    ./pastad
+
 ### Docker
 
     docker build . -t feldspaten.org/pasta         # Build docker container
