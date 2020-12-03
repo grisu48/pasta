@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/grisu48/pasta.svg?branch=main)](https://travis-ci.org/grisu48/pasta)
+
 # pasta
 
 Stupid simple pastebin service written in go
