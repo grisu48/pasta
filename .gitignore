@@ -4,6 +4,10 @@
 *.dll
 *.so
 *.dylib
+/pastad
+/pasta
+cmd/pastad/pastad
+cmd/pasta/pasta
 
 # Test binary, built with `go test -c`
 *.test
@@ -13,3 +17,12 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+# vscode
+.vscode
+__debug_bin
+
+# data files, directories and databases
+*.db
+bins
+*.toml

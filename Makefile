@@ -12,4 +12,3 @@ pastad: cmd/pastad/*.go
 
 test:
 	go test ./...
-	./test.sh
