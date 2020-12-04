@@ -29,3 +29,17 @@ Create or run the container with
 
 The container needs a `data` directory with a valid `pastad.toml` (See the [example file](pastad.toml.example), otherwise default values will be used).
 
+# Usage
+
+Assuing the server runs on http://localhost:8199, you can use the `pasta` tool or simply `curl` :
+
+    curl -X POST 'http://localhost:8199' -d @README.md
+
+## pasta CLI
+
+`pasta` is the CLI utility for easy handling
+
+    pasta < README.md
+    pasta -r http://localhost:8199
+
+`pasta` reads the `~/.pasta.toml` file (see the [example file](pasta.toml.example))
