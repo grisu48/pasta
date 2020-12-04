@@ -1,91 +1,245 @@
 package main
 
 import (
-	"database/sql"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"testing"
 	"time"
 )
 
-const testFilename = "test.db"
+var testBowl PastaBowl
 
 func TestMain(m *testing.M) {
-	var err error
-
 	// Initialisation
 	rand.Seed(time.Now().UnixNano())
-	os.Remove(testFilename)
-	db, err = sql.Open("sqlite3", testFilename)
-	if err != nil {
-		panic(err)
-	}
-	if err = DbInitialize(db); err != nil {
-		panic(err)
-	}
-	defer db.Close()
+	testBowl.Directory = "pasta_test"
+	os.Mkdir(testBowl.Directory, os.ModePerm)
+	defer os.RemoveAll(testBowl.Directory)
 	// Run tests
 	ret := m.Run()
 	os.Exit(ret)
 }
 
-func TestBins(t *testing.T) {
+func TestMetadata(t *testing.T) {
 	var err error
-	var bin Bin
-	bin1 := Bin{Id: "a", Owner: "user1", CreationDate: 1, ExpireDate: 1000, Size: 10}
-	bin2 := Bin{Id: "b", Owner: "user2", CreationDate: 2, ExpireDate: 2000, Size: 50}
+	var pasta, p1, p2, p3 Pasta
 
-	if err = InsertBin(bin1); err != nil {
-		t.Fatalf("Error inserting bin 1: %s", err)
+	if err = testBowl.InsertPasta(&p1); err != nil {
+		t.Fatalf("Error inserting pasta 1: %s", err)
 		return
 	}
-	if err = InsertBin(bin2); err != nil {
-		t.Fatalf("Error inserting bin 2: %s", err)
+	if p1.Id == "" {
+		t.Fatal("Pasta 1 id not set")
 		return
 	}
-	if bin, err = FetchBin(bin1.Id); err != nil {
-		t.Fatalf("Error getting bin 1: %s", err)
-		return
-	} else if bin != bin1 {
-		t.Fatal("Bin 1 mismatch", err)
+	if p1.Token == "" {
+		t.Fatal("Pasta 1 id not set")
 		return
 	}
-	if bin, err = FetchBin(bin2.Id); err != nil {
-		t.Fatalf("Error getting bin 2: %s", err)
-		return
-	} else if bin != bin2 {
-		t.Fatal("Bin 2 mismatch", err)
+	if err = testBowl.InsertPasta(&p2); err != nil {
+		t.Fatalf("Error inserting pasta 2: %s", err)
 		return
 	}
-	if err = DeleteBin(bin1.Id); err != nil {
-		t.Fatalf("Error deleting bin 1: %s", err)
+	// Insert pasta with given ID and Token
+	p3Id := testBowl.GenerateRandomBinId(12)
+	p3Token := RandomString(20)
+	p3.Id = p3Id
+	p3.Token = p3Token
+	if err = testBowl.InsertPasta(&p3); err != nil {
+		t.Fatalf("Error inserting pasta 3: %s", err)
 		return
 	}
-	if bin, err = FetchBin(bin1.Id); err != nil {
-		t.Fatalf("Error getting bin 1 after delete: %s", err)
-		return
-	} else if bin.Id != "" {
-		t.Fatal("Bin 1 still exists after delete", err)
+	if p3.Id != p3Id {
+		t.Fatal("Pasta 3 id mismatch")
 		return
 	}
-	// Check if bin2 is still existing
-	if bin, err = FetchBin(bin2.Id); err != nil {
-		t.Fatalf("Error getting bin 2: %s", err)
-		return
-	} else if bin != bin2 {
-		t.Fatal("Bin 2 mismatch after deleting", err)
+	if p3.Token != p3Token {
+		t.Fatal("Pasta 3 id mismatch")
 		return
 	}
-	// Now delete bin2 as well
-	if err = DeleteBin(bin2.Id); err != nil {
-		t.Fatalf("Error deleting bin 1: %s", err)
+
+	pasta, err = testBowl.GetPasta(p1.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta 1: %s", err)
 		return
 	}
-	if bin, err = FetchBin(bin2.Id); err != nil {
-		t.Fatalf("Error getting bin 2 after delete: %s", err)
-		return
-	} else if bin.Id != "" {
-		t.Fatal("Bin 2 still exists after delete", err)
+	if pasta != p1 {
+		t.Fatal("Pasta 1 mismatch")
 		return
 	}
+	pasta, err = testBowl.GetPasta(p2.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta 2: %s", err)
+		return
+	}
+	if pasta != p2 {
+		t.Fatal("Pasta 2 mismatch")
+		return
+	}
+	pasta, err = testBowl.GetPasta(p3.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta 3: %s", err)
+		return
+	}
+	if pasta != p3 {
+		t.Fatal("Pasta 3 mismatch")
+		return
+	}
+
+	if err = testBowl.DeletePasta(p1.Id); err != nil {
+		t.Fatalf("Error deleting pasta 1: %s", err)
+	}
+	pasta, err = testBowl.GetPasta(p1.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta 1 (after delete): %s", err)
+		return
+	}
+	if pasta.Id != "" {
+		t.Fatal("Pasta 1 exists after delete")
+		return
+	}
+	// Ensure pasta 2 and 3 are not affected if we delete pasta 1
+	pasta, err = testBowl.GetPasta(p2.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta 2 after deleting pasta 1: %s", err)
+		return
+	}
+	if pasta != p2 {
+		t.Fatal("Pasta 2 mismatch after deleting pasta 1")
+		return
+	}
+	pasta, err = testBowl.GetPasta(p3.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta 3 after deleting pasta 1: %s", err)
+		return
+	}
+	if pasta != p3 {
+		t.Fatal("Pasta 3 mismatch after deleteing pasta 1")
+		return
+	}
+	// Delete also pasta 2
+	if err = testBowl.DeletePasta(p2.Id); err != nil {
+		t.Fatalf("Error deleting pasta 2: %s", err)
+	}
+	pasta, err = testBowl.GetPasta(p2.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta 2 (after delete): %s", err)
+		return
+	}
+	if pasta.Id != "" {
+		t.Fatal("Pasta 2 exists after delete")
+		return
+	}
+	pasta, err = testBowl.GetPasta(p3.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta 3 after deleting pasta 2: %s", err)
+		return
+	}
+	if pasta != p3 {
+		t.Fatal("Pasta 3 mismatch after deleting pasta 2")
+		return
+	}
+}
+
+func TestBlobs(t *testing.T) {
+	var err error
+	var p1, p2 Pasta
+
+	// Contents
+	testString1 := RandomString(4096 * 8)
+	testString2 := RandomString(4096 * 8)
+
+	if err = testBowl.InsertPasta(&p1); err != nil {
+		t.Fatalf("Error inserting pasta 1: %s", err)
+		return
+	}
+	file, err := testBowl.GetPastaWriter(p1.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta file 1: %s", err)
+		return
+	}
+	defer file.Close()
+	if _, err = file.Write([]byte(testString1)); err != nil {
+		t.Fatalf("Error writing to pasta file 1: %s", err)
+		return
+	}
+	if err = file.Close(); err != nil {
+		t.Fatalf("Error closing pasta file 1: %s", err)
+		return
+	}
+	if err = testBowl.InsertPasta(&p2); err != nil {
+		t.Fatalf("Error inserting pasta 2: %s", err)
+		return
+	}
+	file, err = testBowl.GetPastaWriter(p2.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta file 2: %s", err)
+		return
+	}
+	defer file.Close()
+	if _, err = file.Write([]byte(testString2)); err != nil {
+		t.Fatalf("Error writing to pasta file 2: %s", err)
+		return
+	}
+	if err = file.Close(); err != nil {
+		t.Fatalf("Error closing pasta file 2: %s", err)
+		return
+	}
+	// Fetch contents now
+	file, err = testBowl.GetPastaReader(p1.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta reader 1: %s", err)
+		return
+	}
+	buf, err := ioutil.ReadAll(file)
+	file.Close()
+	if err != nil {
+		t.Fatalf("Error reading pasta 1: %s", err)
+		return
+	}
+	if testString1 != string(buf) {
+		t.Fatal("Mismatch: pasta 1 contents")
+		t.Logf("Bytes: Read %d, Expected %d", len(buf), len(([]byte(testString1))))
+		return
+	}
+	// Same for pasta 2
+	file, err = testBowl.GetPastaReader(p2.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta reader 2: %s", err)
+		return
+	}
+	buf, err = ioutil.ReadAll(file)
+	file.Close()
+	if err != nil {
+		t.Fatalf("Error reading pasta 2: %s", err)
+		return
+	}
+	if testString2 != string(buf) {
+		t.Fatal("Mismatch: pasta 2 contents")
+		t.Logf("Bytes: Read %d, Expected %d", len(buf), len(([]byte(testString2))))
+		return
+	}
+
+	// Check if pasta 1 can be deleted and the contents of pasta 2 are still OK afterwards
+	if err = testBowl.DeletePasta(p1.Id); err != nil {
+		t.Fatalf("Error deleting pasta 1: %s", err)
+	}
+	file, err = testBowl.GetPastaReader(p2.Id)
+	if err != nil {
+		t.Fatalf("Error getting pasta reader 2: %s", err)
+		return
+	}
+	buf, err = ioutil.ReadAll(file)
+	file.Close()
+	if err != nil {
+		t.Fatalf("Error reading pasta 2: %s", err)
+		return
+	}
+	if testString2 != string(buf) {
+		t.Fatal("Mismatch: pasta 2 contents")
+		t.Logf("Bytes: Read %d, Expected %d", len(buf), len(([]byte(testString2))))
+		return
+	}
+
 }

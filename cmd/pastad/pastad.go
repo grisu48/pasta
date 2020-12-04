@@ -5,7 +5,6 @@
 package main
 
 import (
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -18,21 +17,20 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 type Config struct {
 	BaseUrl       string `toml:"BaseURL"`  // Instance base URL
-	DbFile        string `toml:"Database"` // SQLite3 database
-	BinDir        string `toml:"BinsDir"`  // dir where bins are stored
+	PastaDir      string `toml:"PastaDir"` // dir where pasta are stored
 	BindAddr      string `toml:"BindAddress"`
 	MaxBinSize    int64  `toml:"MaxBinSize"` // Max bin size in bytes
 	BinCharacters int    `toml:"BinCharacters"`
 }
 
 var cf Config
+var bowl PastaBowl
 
-func ExtractBinName(path string) string {
+func ExtractPastaId(path string) string {
 	i := strings.LastIndex(path, "/")
 	if i < 0 {
 		return path
@@ -41,96 +39,96 @@ func ExtractBinName(path string) string {
 	}
 }
 
-func SendBin(id string, w http.ResponseWriter) error {
-	filename := fmt.Sprintf("%s/%s", cf.BinDir, id)
-	file, err := os.OpenFile(filename, os.O_RDONLY, 0400)
+func SendPasta(id string, w http.ResponseWriter) error {
+	pasta, err := bowl.GetPasta(id)
+	if err != nil {
+		return err
+	}
+	file, err := bowl.GetPastaReader(id)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	stat, _ := file.Stat()
-	w.Header().Set("Content-Length", strconv.FormatInt(stat.Size(), 10))
+	w.Header().Set("Content-Length", strconv.FormatInt(pasta.Size, 10))
 	w.Header().Set("Content-Type", "text/plain")
 	_, err = io.Copy(w, file)
 	return err
 }
 
-func ReceiveBin(r *http.Request) (Bin, error) {
+func ReceivePasta(r *http.Request) (Pasta, error) {
 	var err error
 	reader := r.Body
 	buf := make([]byte, 4096)
-	bin := Bin{Id: ""}
-	var size int64
+	pasta := Pasta{Id: ""}
 	defer reader.Close()
 
 	// TODO: Use suggested ID from http header if present
 
-	bin.Id, err = GenerateRandomBinId(cf.BinCharacters)
-	if err != nil {
-		log.Fatalf("Server error while generating random bin: %s", err)
-		bin.Id = ""
-		return bin, err
+	pasta.Id = bowl.GenerateRandomBinId(cf.BinCharacters)
+	if err = bowl.InsertPasta(&pasta); err != nil {
+		return pasta, err
 	}
-	filename := fmt.Sprintf("%s/%s", cf.BinDir, bin.Id)
-	file, err := os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0640)
+	// Append contents to file
+	file, err := os.OpenFile(pasta.Filename, os.O_RDWR|os.O_APPEND, 0640)
 	if err != nil {
-		return bin, err
+		file.Close()
+		return pasta, err
 	}
 	defer file.Close()
-	for size < cf.MaxBinSize {
+	pasta.Size = 0
+	for pasta.Size < cf.MaxBinSize {
 		n, err := reader.Read(buf)
 		if (err == nil || err == io.EOF) && n > 0 {
 			if _, err = file.Write(buf[:n]); err != nil {
 				log.Fatalf("Write error while receiving bin: %s", err)
-				return bin, err
+				return pasta, err
 			}
-			size += int64(n)
+			pasta.Size += int64(n)
 		}
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
 			log.Fatalf("Receive error while receiving bin: %s", err)
-			return bin, err
+			return pasta, err
 		}
 	}
-	if size >= cf.MaxBinSize {
+	if pasta.Size >= cf.MaxBinSize {
 		log.Println("Max size exceeded while receiving bin")
-		return bin, errors.New("Bin size exceeded")
+		return pasta, errors.New("Bin size exceeded")
 	}
-	if size == 0 {
-		return bin, nil
+	if pasta.Size == 0 {
+		// This is invalid
+		file.Close()
+		bowl.DeletePasta(pasta.Id)
+		pasta.Id = ""
+		pasta.Filename = ""
+		pasta.Token = ""
+		pasta.ExpireDate = 0
+		return pasta, nil
 	}
 
-	file.Sync()
-	file.Close()
-	bin.CreationDate = time.Now().Unix()
-	bin.Size = size
-	err = InsertBin(bin)
-	if err != nil {
-		log.Fatalf("Database while receiving bin: %s", err)
-		os.Remove(filename)
-		bin.Id = ""
-		return bin, err
-	}
-	return bin, nil
+	return pasta, file.Sync()
 }
 
 func handlerPost(w http.ResponseWriter, r *http.Request) {
-	bin, err := ReceiveBin(r)
+	pasta, err := ReceivePasta(r)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "Server error")
+		log.Printf("Receive error: %s", err)
 		return
 	} else {
-		if bin.Id == "" {
+		if pasta.Id == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Empty content"))
+			w.Write([]byte("Empty pasta"))
 		} else {
-			log.Printf("Received bin %s (%d bytes) from %s", bin.Id, bin.Size, r.RemoteAddr)
+			log.Printf("Received bin %s (%d bytes) from %s", pasta.Id, pasta.Size, r.RemoteAddr)
 			w.WriteHeader(http.StatusOK)
-			url := fmt.Sprintf("%s/%s", cf.BaseUrl, bin.Id)
-			w.Write([]byte(url))
+			url := fmt.Sprintf("%s/%s", cf.BaseUrl, pasta.Id)
+			// Dont use json package, the reply is simple enough to build it on-the-fly
+			reply := fmt.Sprintf("{\"url\":\"%s\",\"token\":\"%s\"}", url, pasta.Token)
+			w.Write([]byte(reply))
 		}
 	}
 }
@@ -138,24 +136,24 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 func handler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		// Check if bin ID is given
-		binId := ExtractBinName(r.URL.Path)
-		if binId == "" {
+		id := ExtractPastaId(r.URL.Path)
+		if id == "" {
 			fmt.Fprintf(w, "<!doctype html><html><head>")
 			fmt.Fprintf(w, "<body>Stupid simple pastebin service</body>")
 			fmt.Fprintf(w, "</html>")
 		} else {
-			bin, err := FetchBin(binId)
+			pasta, err := bowl.GetPasta(id)
 			if err != nil {
 				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "Database error")
-				log.Fatalf("Database error: %s", err)
+				fmt.Fprintf(w, "Storage error")
+				log.Fatalf("Storage error: %s", err)
 				return
 			}
-			if bin.Id == "" {
-				fmt.Fprintf(w, "No such bin: %s", binId)
+			if pasta.Id == "" {
+				fmt.Fprintf(w, "No such pasta: %s", id)
 			} else {
-				if err = SendBin(bin.Id, w); err != nil {
-					log.Printf("Error sending bin %s: %s", bin.Id, err)
+				if err = SendPasta(pasta.Id, w); err != nil {
+					log.Printf("Error sending pasta %s: %s", pasta.Id, err)
 				}
 			}
 		}
@@ -167,51 +165,43 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func handlerPrivacy(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintf(w, "<!doctype html><html><head>")
-	fmt.Fprintf(w, "<body><h1>Privacy</h1><p>When fetching bins no data is collected</p><p>When pasting a bin, the pasted content is stored and your IP address is logged for debugging and abuse prevention purposes</p></body>")
-	fmt.Fprintf(w, "</html>")
-}
-
 func handlerHealth(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "OK")
 }
 
 func main() {
-	var err error
+	configFile := "pastad.toml"
 	// Set defaults
 	cf.BaseUrl = "http://localhost:8199"
-	cf.DbFile = "pasta.db"
-	cf.BinDir = "bins/"
+	cf.PastaDir = "pastas/"
 	cf.BindAddr = "127.0.0.1:8199"
 	cf.MaxBinSize = 1024 * 1024 * 25 // Default max size: 25 MB
 	cf.BinCharacters = 8             // Note: Never use less than 8 characters!
 	rand.Seed(time.Now().Unix())
-	if _, err := toml.DecodeFile("pastad.toml", &cf); err != nil {
-		fmt.Printf("Error loading configuration file: %s\n", err)
-		os.Exit(1)
+	fmt.Println("Starting pasta server ... ")
+	if FileExists(configFile) {
+		if _, err := toml.DecodeFile(configFile, &cf); err != nil {
+			fmt.Printf("Error loading configuration file: %s\n", err)
+			os.Exit(1)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "Warning: Config file '%s' not found\n", configFile)
 	}
+
+	// Sanity check
 	if cf.BinCharacters < 8 {
 		log.Println("Warning: Using less than 8 bin characters is recommended and might lead to unintended side-effects")
 	}
-	os.Mkdir(cf.BinDir, os.ModePerm)
+	if cf.PastaDir == "" {
+		cf.PastaDir = "."
+	}
+	bowl.Directory = cf.PastaDir
+	os.Mkdir(bowl.Directory, os.ModePerm)
 
-	// Database
-	log.Printf("Database initialization: %s", cf.DbFile)
-	db, err = sql.Open("sqlite3", cf.DbFile)
-	if err != nil {
-		panic(err)
-	}
-	if err = DbInitialize(db); err != nil {
-		panic(err)
-	}
-	defer db.Close()
 	// Setup webserver
 	log.Printf("Webserver initialization: http://%s", cf.BindAddr)
 	http.HandleFunc("/", handler)
-	http.HandleFunc("/privacy", handlerPrivacy)
 	http.HandleFunc("/health", handlerHealth)
-	log.Println("Startup completed")
-	log.Printf("Up and running: http://%s", cf.BindAddr)
+	log.Printf("Startup completed. Serving http://%s", cf.BindAddr)
 	log.Fatal(http.ListenAndServe(cf.BindAddr, nil))
 }

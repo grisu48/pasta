@@ -1,6 +1,5 @@
 BaseURL = "http://localhost:8199"
-Database = "pastad.db"
-BinsDir = "bins"
+PastaDir = "bins"
 BindAddress = ":8199"
 MaxBinSize = 26214400  # 5 MB
 BinCharacters = 8

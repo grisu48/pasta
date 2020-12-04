@@ -1,64 +1,22 @@
 package main
 
 import (
-	"database/sql"
+	"bufio"
+	"errors"
+	"fmt"
+	"io"
 	"math/rand"
+	"os"
+	"strconv"
+	"strings"
 )
 
-var db *sql.DB
-
-type Bin struct {
-	Id           string
-	Owner        string
-	CreationDate int64
-	ExpireDate   int64
-	Size         int64
-}
-
-func DbInitialize(db *sql.DB) error {
-	_, err := db.Exec("CREATE TABLE IF NOT EXISTS `bins` (`id` VARCHAR(64) PRIMARY KEY, `owner` VARCHAR(64), `createdate` int, `expiredate` int, `size` int);")
-	if err != nil {
-		panic(err)
-	}
-	return nil
-}
-
-func FetchBin(id string) (Bin, error) {
-	bin := Bin{Id: ""}
-	stmt, err := db.Prepare("SELECT `id`,`owner`,`createdate`,`expiredate`,`size` FROM `bins` WHERE `id` = ? LIMIT 1;")
-	if err != nil {
-		return bin, err
-	}
-	defer stmt.Close()
-	rows, err := stmt.Query(id)
-	if err != nil {
-		return bin, err
-	}
-	defer rows.Close()
-	if rows.Next() {
-		rows.Scan(&bin.Id, &bin.Owner, &bin.CreationDate, &bin.ExpireDate, &bin.Size)
-	}
-	return bin, nil
-}
-
-func InsertBin(bin Bin) error {
-	stmt, err := db.Prepare("INSERT INTO `bins`(`id`,`owner`,`createdate`,`expiredate`,`size`) VALUES (?,?,?,?,?);")
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-	_, err = stmt.Exec(bin.Id, bin.Owner, bin.CreationDate, bin.ExpireDate, bin.Size)
-	return err
-}
-
-func DeleteBin(id string) error {
-	stmt, err := db.Prepare("DELETE FROM `bins` WHERE `id` = ?;")
-	if err != nil {
-		return err
-	}
-	defer stmt.Close()
-	_, err = stmt.Exec(id)
-	return err
+type Pasta struct {
+	Id         string
+	Token      string
+	Filename   string
+	ExpireDate int64
+	Size       int64
 }
 
 func RandomString(n int) string {
@@ -70,15 +28,160 @@ func RandomString(n int) string {
 	return string(b)
 }
 
-func GenerateRandomBinId(n int) (string, error) {
+func FileExists(filename string) bool {
+	_, err := os.Stat(filename)
+	if err != nil {
+		return false
+	}
+	return !os.IsNotExist(err)
+}
+
+/* PastaBowl is the main storage instance */
+type PastaBowl struct {
+	Directory string // Directory where the pastas are
+}
+
+func (bowl *PastaBowl) filename(id string) string {
+	return fmt.Sprintf("%s/%s", bowl.Directory, id)
+}
+
+func (bowl *PastaBowl) Exists(id string) bool {
+	return FileExists(bowl.filename(id))
+}
+
+// get pasta metadata
+func (bowl *PastaBowl) GetPasta(id string) (Pasta, error) {
+	pasta := Pasta{Id: "", Filename: bowl.filename(id)}
+	stat, err := os.Stat(bowl.filename(id))
+	if err != nil {
+		// Does not exists results in empty pasta result
+		if !os.IsExist(err) {
+			return pasta, nil
+		}
+		return pasta, err
+	}
+	pasta.Size = stat.Size()
+	file, err := os.OpenFile(pasta.Filename, os.O_RDONLY, 0400)
+	if err != nil {
+		return pasta, err
+	}
+	defer file.Close()
+	// Read metadata (until "---")
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		if err = scanner.Err(); err != nil {
+			return pasta, err
+		}
+		line := scanner.Text()
+		pasta.Size -= int64(len(line) + 1)
+		if line == "---" {
+			break
+		}
+		// Parse metadata (name: value)
+		i := strings.Index(line, ":")
+		if i <= 0 {
+			continue
+		}
+		name, value := strings.TrimSpace(line[:i]), strings.TrimSpace(line[i+1:])
+		if name == "token" {
+			pasta.Token = value
+		} else if name == "expire" {
+			pasta.ExpireDate, _ = strconv.ParseInt(value, 10, 64)
+		}
+
+	}
+	// All good
+	pasta.Id = id
+	return pasta, nil
+}
+
+func (bowl *PastaBowl) getPastaFile(id string, flag int) (*os.File, error) {
+	filename := bowl.filename(id)
+	file, err := os.OpenFile(filename, flag, 0640)
+	if err != nil {
+		return nil, err
+	}
+	buf := make([]byte, 1)
+	c := 0 // Counter
+	for {
+		n, err := file.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				file.Close()
+				return nil, err
+			}
+			file.Close()
+			return nil, err
+		}
+		if n == 0 {
+			continue
+		}
+		if buf[0] == '-' {
+			c++
+		} else if buf[0] == '\n' {
+			if c >= 3 {
+				return file, nil
+			}
+			c = 0
+		}
+	}
+	// This should never occur
+	file.Close()
+	return nil, errors.New("Unexpected end of block")
+}
+
+// Get the file instance to the pasta content (read-only)
+func (bowl *PastaBowl) GetPastaReader(id string) (*os.File, error) {
+	return bowl.getPastaFile(id, os.O_RDONLY)
+}
+
+// Get the file instance to the pasta content (read-only)
+func (bowl *PastaBowl) GetPastaWriter(id string) (*os.File, error) {
+	return bowl.getPastaFile(id, os.O_RDWR)
+}
+
+// Prepare a pasta file to be written. Id and Token will be set, if not already done
+func (bowl *PastaBowl) InsertPasta(pasta *Pasta) error {
+	if pasta.Id == "" {
+		// TODO: Use crypto rand
+		pasta.Id = bowl.GenerateRandomBinId(8) // Use default length here
+	}
+	if pasta.Token == "" {
+		// TODO: Use crypto rand
+		pasta.Token = RandomString(16)
+	}
+	pasta.Filename = bowl.filename(pasta.Id)
+	file, err := os.OpenFile(pasta.Filename, os.O_RDWR|os.O_CREATE, 0640)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := file.Write([]byte(fmt.Sprintf("token:%s\n", pasta.Token))); err != nil {
+		return err
+	}
+	if pasta.ExpireDate > 0 {
+		if _, err := file.Write([]byte(fmt.Sprintf("expire:%d\n", pasta.ExpireDate))); err != nil {
+			return err
+		}
+	}
+	if _, err := file.Write([]byte("---\n")); err != nil {
+		return err
+	}
+	return file.Sync()
+}
+
+func (bowl *PastaBowl) DeletePasta(id string) error {
+	if !bowl.Exists(id) {
+		return nil
+	}
+	return os.Remove(bowl.filename(id))
+}
+
+func (bowl *PastaBowl) GenerateRandomBinId(n int) string {
 	for {
 		id := RandomString(n)
-		bin, err := FetchBin(id)
-		if err != nil {
-			return "", err
-		}
-		if bin.Id == "" {
-			return id, nil
+		if !bowl.Exists(id) {
+			return id
 		}
 	}
 }
