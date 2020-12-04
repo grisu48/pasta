@@ -4,7 +4,7 @@ all: pasta pastad
 requirements:
 	go get github.com/BurntSushi/toml
 	
-pasta: cmd/pasta/pasta.go
+pasta: cmd/pasta/pasta.go cmd/pasta/storage.go
 	go build $^
 pastad: cmd/pastad/pastad.go cmd/pastad/storage.go
 	go build $^
