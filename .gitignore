@@ -26,3 +26,5 @@ __debug_bin
 *.db
 bins
 *.toml
+pasta_test
+/pastas

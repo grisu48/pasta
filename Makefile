@@ -2,13 +2,17 @@ default: all
 all: pasta pastad
 
 requirements:
-	go get github.com/mattn/go-sqlite3
 	go get github.com/BurntSushi/toml
 	
-pasta: cmd/pasta/*.go
+pasta: cmd/pasta/pasta.go
 	go build $^
-pastad: cmd/pastad/*.go
+pastad: cmd/pastad/pastad.go cmd/pastad/storage.go
 	go build $^
 
-test:
+test: pastad
 	go test ./...
+	# TODO: This syntax is horrible :-)
+	bash -c 'cd test && ./test.sh'
+
+docker: Dockerfile pasta pastad
+	docker build . -t feldspaten.org/pasta

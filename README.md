@@ -16,6 +16,10 @@ Then create a `pastad.toml` file using the provided example (`pastad.toml.exampl
 
 ### Docker
 
+    make docker
+
+Or manually:
+
     docker build . -t feldspaten.org/pasta         # Build docker container
 
 Create or run the container with
@@ -23,5 +27,5 @@ Create or run the container with
     docker container create --name pasta -p 8199:8199 -v ABSOLUTE_PATH_TO_DATA_DIR:/data feldspaten.org/pasta
     docker container run --name pasta -p 8199:8199 -v ABSOLUTE_PATH_TO_DATA_DIR:/data feldspaten.org/pasta
 
-The container needs a `data` directory with a valid `pastad.toml` (See the [example file](pastad.toml.example))
+The container needs a `data` directory with a valid `pastad.toml` (See the [example file](pastad.toml.example), otherwise default values will be used).
 

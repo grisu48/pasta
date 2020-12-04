@@ -9,7 +9,10 @@ go:
 dist:
   - bionic
 
-script:
+before_script:
+  - sudo apt-get -y install jq
   - make requirements
+
+script:
   - make
   - make test

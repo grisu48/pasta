@@ -10,5 +10,5 @@ RUN mkdir /app
 RUN mkdir /data
 WORKDIR /data
 COPY --from=build-env /app/pastad /app/pastad
-CMD /app/pastad
+ENTRYPOINT /app/pastad
 VOLUME ["/data"]
