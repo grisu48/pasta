@@ -5,11 +5,13 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
-	"flag"
+	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -28,8 +30,49 @@ func FileExists(filename string) bool {
 	return !os.IsNotExist(err)
 }
 
+func usage() {
+	fmt.Printf("Usage: %s [OPTIONS] [FILE,[FILE2,...]]\n\n", os.Args[0])
+	fmt.Println("OPTIONS")
+	fmt.Println("     -h, --help                 Print this help message")
+	fmt.Println("     -r, --remote HOST          Define remote host (Default: http://localhost:8199)")
+	fmt.Println("     -c, --config FILE          Define config file (Default: ~/.pasta.toml)")
+	fmt.Println("     -f, --file FILE            Send FILE to server")
+	fmt.Println("")
+	fmt.Println("     --ls, --list               List known pasta pushes")
+	fmt.Println("")
+	fmt.Println("One or more files can be fined which will be pushed to the given server")
+	fmt.Println("If no file is given, the input from stdin will be pushed")
+}
+
+func push(src io.Reader) (Pasta, error) {
+	pasta := Pasta{}
+	resp, err := http.Post(cf.RemoteHost, "text/plain", src)
+	if err != nil {
+		return pasta, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return pasta, fmt.Errorf("http status code: %d", resp.StatusCode)
+	}
+	err = json.NewDecoder(resp.Body).Decode(&pasta)
+	if err != nil {
+		return pasta, err
+	}
+	return pasta, nil
+}
+
+func getFilename(filename string) string {
+	i := strings.LastIndex(filename, "/")
+	if i < 0 {
+		return filename
+	} else {
+		return filename[i+1:]
+	}
+}
+
 func main() {
 	cf.RemoteHost = "http://localhost:8199"
+	action := "push"
 	// Load configuration file if possible (swallow errors)
 	homeDir, _ := os.UserHomeDir()
 	configFile := homeDir + "/.pasta.toml"
@@ -38,27 +81,97 @@ func main() {
 			fmt.Fprintf(os.Stderr, "config-toml file parse error: %s %s\n", configFile, err)
 		}
 	}
+	// Files to be pushed
+	files := make([]string, 0)
 	// Parse program arguments
-	flag.StringVar(&cf.RemoteHost, "r", cf.RemoteHost, "Specify remote host")
-    flag.Parse()
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "" {
+			continue
+		}
+		if arg[0] == '-' {
+			if arg == "-h" || arg == "--help" {
+				usage()
+				os.Exit(0)
+			} else if arg == "-r" || arg == "--remote" {
+				i++
+				cf.RemoteHost = args[i]
+			} else if arg == "-c" || arg == "--config" {
+				i++
+				if _, err := toml.DecodeFile(args[i], &cf); err != nil {
+					fmt.Fprintf(os.Stderr, "config-toml file parse error: %s %s\n", configFile, err)
+				}
+			} else if arg == "-f" || arg == "--file" {
+				i++
+				files = append(files, args[i])
+			} else if arg == "--ls" || arg == "--list" {
+				action = "list"
+			} else {
+				fmt.Fprintf(os.Stderr, "Invalid argument: %s\n", arg)
+				os.Exit(1)
+			}
+		} else {
+			files = append(files, arg)
+		}
+	}
+	// Sanity checks
+	if strings.Index(cf.RemoteHost, "://") < 0 {
+		cf.RemoteHost = "http://" + cf.RemoteHost
+	}
+	// Load stored pastas
+	stor, err := OpenStorage(homeDir + "/.pastas.dat")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading stored pastas: %s\n", err)
+	}
 
-	reader := bufio.NewReader(os.Stdin)
-	// Push to server
-	resp, err := http.Post(cf.RemoteHost, "text/plain", reader)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "http error: %s\n", err)
+	if action == "push" || action == "" {
+		if len(files) > 0 {
+			for _, filename := range files {
+				file, err := os.OpenFile(filename, os.O_RDONLY, 0400)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "%s: %s\n", filename, err)
+					os.Exit(1)
+				}
+				defer file.Close()
+				// Push file
+				pasta, err := push(file)
+				pasta.Filename = getFilename(filename)
+				pasta.Date = time.Now().Unix()
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "%s\n", err)
+					os.Exit(1)
+				}
+				if err = stor.Append(pasta); err != nil {
+					fmt.Fprintf(os.Stderr, "Error writing pasta to local store: %s\n", err)
+				}
+				fmt.Printf("%s - %s\n", pasta.Filename, pasta.Url)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "No input file given - Reading from stdin")
+			reader := bufio.NewReader(os.Stdin)
+			pasta, err := push(reader)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "%s\n", err)
+				os.Exit(1)
+			}
+			if err = stor.Append(pasta); err != nil {
+				fmt.Fprintf(os.Stderr, "Error writing pasta to local store: %s\n", err)
+			}
+			fmt.Println(pasta.Url)
+		}
+	} else if action == "list" {
+		fmt.Printf("%-30s   %-19s   %s\n", "Filename", "Date", "URL")
+		for _, pasta := range stor.Pastas {
+			t := time.Unix(pasta.Date, 0)
+			filename := pasta.Filename
+			if filename == "" {
+				filename = "<none>"
+			}
+			fmt.Printf("%-30s   %-19s   %s\n", filename, t.Format("2006-01-02-15:04:05"), pasta.Url)
+		}
+	} else {
+		fmt.Fprintf(os.Stderr, "Unkown action: %s\n", action)
 		os.Exit(1)
 	}
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "http fetch error: %s\n", err)
-		os.Exit(1)
-	}
-	if resp.StatusCode != 200 {
-		fmt.Fprintf(os.Stderr, "http status code %d\n", err)
-		fmt.Println(string(body))
-		os.Exit(1)
-	}
-	fmt.Println(string(body))
 }
