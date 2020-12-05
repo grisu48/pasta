@@ -12,9 +12,9 @@ The easiest way of self-hosting a `pasta` server is via the [docker image](https
 * Put the [pastad.toml](pastad.toml.example) file there
 * Start the container, mount the `data` directory as `/data`
 
-Assuming your data is in `/var/pasta/` you can do
+Assuming your data is in `/srv/pasta/` you can do
 
-    docker container run -d /var/pasta:/data -p 8199:8199 grisu48/pasta
+    docker container run -d -v /srv/pasta:/data -p 127.0.0.1:8199:8199 grisu48/pasta
 
 Configure your reverse proxy (e.g. `nginx`) then accordingly.
 

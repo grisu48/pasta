@@ -1,5 +1,5 @@
-BaseURL = "http://localhost:8199"
-PastaDir = "bins"
-BindAddress = ":8199"
-MaxBinSize = 26214400  # 5 MB
-BinCharacters = 8
+BaseURL = "http://localhost:8199"    # replace with your hostname
+PastaDir = "pastas"                  # absolute or relative path to the pastas
+BindAddress = ":8199"                # server bind address
+MaxBinSize = 26214400                # max allowed pasta size - 5 MB
+BinCharacters = 8                    # default number of characters for pasta id
