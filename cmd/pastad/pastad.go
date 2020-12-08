@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -55,24 +56,12 @@ func SendPasta(id string, w http.ResponseWriter) error {
 	return err
 }
 
-func ReceivePasta(r *http.Request) (Pasta, error) {
-	var err error
-	reader := r.Body
+func receiveBody(reader io.Reader, pasta *Pasta) error {
 	buf := make([]byte, 4096)
-	pasta := Pasta{Id: ""}
-	defer reader.Close()
-
-	// TODO: Use suggested ID from http header if present
-
-	pasta.Id = bowl.GenerateRandomBinId(cf.BinCharacters)
-	if err = bowl.InsertPasta(&pasta); err != nil {
-		return pasta, err
-	}
-	// Append contents to file
 	file, err := os.OpenFile(pasta.Filename, os.O_RDWR|os.O_APPEND, 0640)
 	if err != nil {
 		file.Close()
-		return pasta, err
+		return err
 	}
 	defer file.Close()
 	pasta.Size = 0
@@ -81,17 +70,60 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 		if (err == nil || err == io.EOF) && n > 0 {
 			if _, err = file.Write(buf[:n]); err != nil {
 				log.Fatalf("Write error while receiving bin: %s", err)
-				return pasta, err
+				return err
 			}
 			pasta.Size += int64(n)
 		}
 		if err != nil {
 			if err == io.EOF {
-				break
+				return nil
 			}
 			log.Fatalf("Receive error while receiving bin: %s", err)
-			return pasta, err
+			return err
 		}
+	}
+	return nil
+}
+
+func receiveMultibody(r *http.Request, pasta *Pasta) error {
+	err := r.ParseMultipartForm(cf.MaxBinSize)
+	if err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	filename := pasta.Filename + "_tmp"
+	// in your case file would be fileupload
+	file, header, err := r.FormFile(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	name := strings.Split(header.Filename, ".")
+	// TODO: Use filename
+	fmt.Printf("File name %s\n", name[0])
+	_, err = io.Copy(&buf, file)
+	return err
+}
+
+func ReceivePasta(r *http.Request) (Pasta, error) {
+	var err error
+	reader := r.Body
+	pasta := Pasta{Id: ""}
+	defer reader.Close()
+
+	// TODO: Use suggested ID from http header if present
+
+	pasta.Id = bowl.GenerateRandomBinId(cf.BinCharacters)
+	// Note InsertPasta sets the filename
+	if err = bowl.InsertPasta(&pasta); err != nil {
+		return pasta, err
+	}
+
+	// Try multipart upload
+	if err := receiveMultibody(r, &pasta); err == nil {
+		// Received via multipart. Continue execution
+	} else if err := receiveBody(r.Body, &pasta); err != nil {
+		return pasta, err
 	}
 	if pasta.Size >= cf.MaxBinSize {
 		log.Println("Max size exceeded while receiving bin")
@@ -99,7 +131,6 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	}
 	if pasta.Size == 0 {
 		// This is invalid
-		file.Close()
 		bowl.DeletePasta(pasta.Id)
 		pasta.Id = ""
 		pasta.Filename = ""
@@ -108,7 +139,7 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 		return pasta, nil
 	}
 
-	return pasta, file.Sync()
+	return pasta, nil
 }
 
 func handlerPost(w http.ResponseWriter, r *http.Request) {
@@ -138,9 +169,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		// Check if bin ID is given
 		id := ExtractPastaId(r.URL.Path)
 		if id == "" {
-			fmt.Fprintf(w, "<!doctype html><html><head>")
-			fmt.Fprintf(w, "<body>Stupid simple pastebin service</body>")
-			fmt.Fprintf(w, "</html>")
+			handlerIndex(w, r)
 		} else {
 			pasta, err := bowl.GetPasta(id)
 			if err != nil {
@@ -167,6 +196,18 @@ func handler(w http.ResponseWriter, r *http.Request) {
 
 func handlerHealth(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "OK")
+}
+
+func handlerIndex(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "<!doctype html><html><head><title>pasta</title></head>\n")
+	fmt.Fprintf(w, "<body>\n")
+	fmt.Fprintf(w, "<h1>pasta</h1>\n")
+	fmt.Fprintf(w, "<p>Stupid simple pastebin service</p>\n")
+	fmt.Fprintf(w, "<form method=\"post\">\n")
+	fmt.Fprintf(w, "<input type=\"file\" id=\"file\" name=\"filename\">")
+	fmt.Fprintf(w, "<input type=\"submit\" value=\"Upload\">")
+	fmt.Fprintf(w, "</form>")
+	fmt.Fprintf(w, "</body></html>")
 }
 
 func main() {
