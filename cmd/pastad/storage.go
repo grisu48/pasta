@@ -12,11 +12,13 @@ import (
 )
 
 type Pasta struct {
-	Id         string
-	Token      string
-	Filename   string
-	ExpireDate int64
-	Size       int64
+	Id                 string // id of the pasta
+	Token              string // modification token
+	Filename           string // filename for the pasta on the disk
+	ExpireDate         int64  // Unix() date when it will expire
+	Size               int64  // file size
+	Mime               string // mime type
+	AttachmentFilename string // filename of the uploaded file
 }
 
 func RandomString(n int) string {
@@ -87,6 +89,10 @@ func (bowl *PastaBowl) GetPasta(id string) (Pasta, error) {
 			pasta.Token = value
 		} else if name == "expire" {
 			pasta.ExpireDate, _ = strconv.ParseInt(value, 10, 64)
+		} else if name == "mime" {
+			pasta.Mime = value
+		} else if name == "filename" {
+			pasta.AttachmentFilename = value
 		}
 
 	}
@@ -161,6 +167,16 @@ func (bowl *PastaBowl) InsertPasta(pasta *Pasta) error {
 	}
 	if pasta.ExpireDate > 0 {
 		if _, err := file.Write([]byte(fmt.Sprintf("expire:%d\n", pasta.ExpireDate))); err != nil {
+			return err
+		}
+	}
+	if pasta.Mime != "" {
+		if _, err := file.Write([]byte(fmt.Sprintf("mime:%s\n", pasta.Mime))); err != nil {
+			return err
+		}
+	}
+	if pasta.AttachmentFilename != "" {
+		if _, err := file.Write([]byte(fmt.Sprintf("filename:%s\n", pasta.AttachmentFilename))); err != nil {
 			return err
 		}
 	}

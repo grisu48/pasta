@@ -25,6 +25,8 @@ func TestMetadata(t *testing.T) {
 	var err error
 	var pasta, p1, p2, p3 Pasta
 
+	p1.AttachmentFilename = "file1"
+	p1.Mime = "text/plain"
 	if err = testBowl.InsertPasta(&p1); err != nil {
 		t.Fatalf("Error inserting pasta 1: %s", err)
 		return
@@ -37,6 +39,8 @@ func TestMetadata(t *testing.T) {
 		t.Fatal("Pasta 1 id not set")
 		return
 	}
+	p2.AttachmentFilename = "file2"
+	p2.Mime = "application/json"
 	if err = testBowl.InsertPasta(&p2); err != nil {
 		t.Fatalf("Error inserting pasta 2: %s", err)
 		return
@@ -46,6 +50,8 @@ func TestMetadata(t *testing.T) {
 	p3Token := RandomString(20)
 	p3.Id = p3Id
 	p3.Token = p3Token
+	p3.AttachmentFilename = "file3"
+	p3.Mime = "text/rtf"
 	if err = testBowl.InsertPasta(&p3); err != nil {
 		t.Fatalf("Error inserting pasta 3: %s", err)
 		return

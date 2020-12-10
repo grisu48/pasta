@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -40,18 +39,22 @@ func ExtractPastaId(path string) string {
 	}
 }
 
-func SendPasta(id string, w http.ResponseWriter) error {
-	pasta, err := bowl.GetPasta(id)
-	if err != nil {
-		return err
-	}
-	file, err := bowl.GetPastaReader(id)
+func SendPasta(pasta Pasta, w http.ResponseWriter) error {
+	file, err := bowl.GetPastaReader(pasta.Id)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 	w.Header().Set("Content-Length", strconv.FormatInt(pasta.Size, 10))
-	w.Header().Set("Content-Type", "text/plain")
+	// TODO: Only add attachment file if download is set
+	/*
+		if pasta.AttachmentFilename != "" {
+			w.Header().Set("Content-Type", pasta.AttachmentFilename)
+		}
+	*/
+	if pasta.Mime != "" {
+		w.Header().Set("Content-Type", pasta.Mime)
+	}
 	_, err = io.Copy(w, file)
 	return err
 }
@@ -85,31 +88,23 @@ func receiveBody(reader io.Reader, pasta *Pasta) error {
 	return nil
 }
 
-func receiveMultibody(r *http.Request, pasta *Pasta) error {
+func receiveMultibody(r *http.Request, pasta *Pasta) (io.ReadCloser, error) {
 	err := r.ParseMultipartForm(cf.MaxBinSize)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var buf bytes.Buffer
-	filename := pasta.Filename + "_tmp"
-	// in your case file would be fileupload
-	file, header, err := r.FormFile(filename)
+	file, header, err := r.FormFile("file")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer file.Close()
-	name := strings.Split(header.Filename, ".")
-	// TODO: Use filename
-	fmt.Printf("File name %s\n", name[0])
-	_, err = io.Copy(&buf, file)
-	return err
+	pasta.AttachmentFilename = header.Filename
+	// TODO: Mime type
+	return file, err
 }
 
 func ReceivePasta(r *http.Request) (Pasta, error) {
 	var err error
-	reader := r.Body
 	pasta := Pasta{Id: ""}
-	defer reader.Close()
 
 	// TODO: Use suggested ID from http header if present
 
@@ -120,9 +115,16 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	}
 
 	// Try multipart upload
-	if err := receiveMultibody(r, &pasta); err == nil {
-		// Received via multipart. Continue execution
-	} else if err := receiveBody(r.Body, &pasta); err != nil {
+	reader, err := receiveMultibody(r, &pasta)
+	if err != nil {
+		// Otherwise assume the message body is the upload content
+		reader = r.Body
+	} else {
+		defer r.Body.Close()
+	}
+	defer reader.Close()
+
+	if err := receiveBody(reader, &pasta); err != nil {
 		return pasta, err
 	}
 	if pasta.Size >= cf.MaxBinSize {
@@ -152,7 +154,7 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 	} else {
 		if pasta.Id == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Empty pasta"))
+			w.Write([]byte("error: empty pasta"))
 		} else {
 			log.Printf("Received bin %s (%d bytes) from %s", pasta.Id, pasta.Size, r.RemoteAddr)
 			w.WriteHeader(http.StatusOK)
@@ -181,7 +183,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 			if pasta.Id == "" {
 				fmt.Fprintf(w, "No such pasta: %s", id)
 			} else {
-				if err = SendPasta(pasta.Id, w); err != nil {
+				if err = SendPasta(pasta, w); err != nil {
 					log.Printf("Error sending pasta %s: %s", pasta.Id, err)
 				}
 			}
@@ -203,10 +205,10 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<body>\n")
 	fmt.Fprintf(w, "<h1>pasta</h1>\n")
 	fmt.Fprintf(w, "<p>Stupid simple pastebin service</p>\n")
-	fmt.Fprintf(w, "<form method=\"post\">\n")
-	fmt.Fprintf(w, "<input type=\"file\" id=\"file\" name=\"filename\">")
-	fmt.Fprintf(w, "<input type=\"submit\" value=\"Upload\">")
-	fmt.Fprintf(w, "</form>")
+	fmt.Fprintf(w, "<form enctype=\"multipart/form-data\" method=\"post\">\n")
+	fmt.Fprintf(w, "<input type=\"file\" name=\"file\" name=\"filename\">\n")
+	fmt.Fprintf(w, "<input type=\"submit\" value=\"Upload\">\n")
+	fmt.Fprintf(w, "</form>\n")
 	fmt.Fprintf(w, "</body></html>")
 }
 
