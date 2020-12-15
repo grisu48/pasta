@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -20,15 +21,17 @@ import (
 )
 
 type Config struct {
-	BaseUrl       string `toml:"BaseURL"`  // Instance base URL
-	PastaDir      string `toml:"PastaDir"` // dir where pasta are stored
-	BindAddr      string `toml:"BindAddress"`
-	MaxBinSize    int64  `toml:"MaxBinSize"` // Max bin size in bytes
-	BinCharacters int    `toml:"BinCharacters"`
+	BaseUrl         string `toml:"BaseURL"`  // Instance base URL
+	PastaDir        string `toml:"PastaDir"` // dir where pasta are stored
+	BindAddr        string `toml:"BindAddress"`
+	MaxPastaSize    int64  `toml:"MaxPastaSize"` // Max bin size in bytes
+	PastaCharacters int    `toml:"PastaCharacters"`
+	MimeTypesFile   string `toml:"MimeTypes` // Load mime types from this file
 }
 
 var cf Config
 var bowl PastaBowl
+var mimeExtensions map[string]string
 
 func ExtractPastaId(path string) string {
 	i := strings.LastIndex(path, "/")
@@ -37,6 +40,37 @@ func ExtractPastaId(path string) string {
 	} else {
 		return path[i+1:]
 	}
+}
+
+/* Load MIME types file. MIME types file is a simple text file that describes mime types based on file extenstions.
+ * The format of the file is
+ * EXTENSION = MIMETYPE
+ */
+func loadMimeTypes(filename string) (map[string]string, error) {
+	ret := make(map[string]string, 0)
+
+	file, err := os.OpenFile(filename, os.O_RDONLY, 0400)
+	if err != nil {
+		return ret, err
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		i := strings.Index(line, "=")
+		if i < 0 {
+			continue
+		}
+		name, value := strings.TrimSpace(line[:i]), strings.TrimSpace(line[i+1:])
+		if name != "" && value != "" {
+			ret[name] = value
+		}
+	}
+
+	return ret, scanner.Err()
 }
 
 func SendPasta(pasta Pasta, w http.ResponseWriter) error {
@@ -68,7 +102,7 @@ func receiveBody(reader io.Reader, pasta *Pasta) error {
 	}
 	defer file.Close()
 	pasta.Size = 0
-	for pasta.Size < cf.MaxBinSize {
+	for pasta.Size < cf.MaxPastaSize {
 		n, err := reader.Read(buf)
 		if (err == nil || err == io.EOF) && n > 0 {
 			if _, err = file.Write(buf[:n]); err != nil {
@@ -88,8 +122,21 @@ func receiveBody(reader io.Reader, pasta *Pasta) error {
 	return nil
 }
 
+/* try to determine the mime type by file extension. Returns empty string on failure */
+func mimeByFilename(filename string) string {
+	i := strings.LastIndex(filename, ".")
+	if i < 0 {
+		return ""
+	}
+	extension := filename[i+1:]
+	if mime, ok := mimeExtensions[extension]; ok {
+		return mime
+	}
+	return ""
+}
+
 func receiveMultibody(r *http.Request, pasta *Pasta) (io.ReadCloser, error) {
-	err := r.ParseMultipartForm(cf.MaxBinSize)
+	err := r.ParseMultipartForm(cf.MaxPastaSize)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +145,10 @@ func receiveMultibody(r *http.Request, pasta *Pasta) (io.ReadCloser, error) {
 		return nil, err
 	}
 	pasta.AttachmentFilename = header.Filename
-	// TODO: Mime type
+	// Determine MIME type based on file extension, if present
+	if pasta.AttachmentFilename != "" {
+		pasta.Mime = mimeByFilename(pasta.AttachmentFilename)
+	}
 	return file, err
 }
 
@@ -108,7 +158,7 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 
 	// TODO: Use suggested ID from http header if present
 
-	pasta.Id = bowl.GenerateRandomBinId(cf.BinCharacters)
+	pasta.Id = bowl.GenerateRandomBinId(cf.PastaCharacters)
 	// Note InsertPasta sets the filename
 	if err = bowl.InsertPasta(&pasta); err != nil {
 		return pasta, err
@@ -127,7 +177,7 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	if err := receiveBody(reader, &pasta); err != nil {
 		return pasta, err
 	}
-	if pasta.Size >= cf.MaxBinSize {
+	if pasta.Size >= cf.MaxPastaSize {
 		log.Println("Max size exceeded while receiving bin")
 		return pasta, errors.New("Bin size exceeded")
 	}
@@ -159,9 +209,28 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Received bin %s (%d bytes) from %s", pasta.Id, pasta.Size, r.RemoteAddr)
 			w.WriteHeader(http.StatusOK)
 			url := fmt.Sprintf("%s/%s", cf.BaseUrl, pasta.Id)
-			// Dont use json package, the reply is simple enough to build it on-the-fly
-			reply := fmt.Sprintf("{\"url\":\"%s\",\"token\":\"%s\"}", url, pasta.Token)
-			w.Write([]byte(reply))
+			// Return format
+			retFormats := r.URL.Query()["ret"]
+			retFormat := ""
+			if len(retFormats) > 0 {
+				retFormat = retFormats[0]
+			}
+			if retFormat == "html" {
+				// Website as return format
+				fmt.Fprintf(w, "<!doctype html><html><head><title>pasta</title></head>\n")
+				fmt.Fprintf(w, "<body>\n")
+				fmt.Fprintf(w, "<h1>pasta</h1>\n")
+				fmt.Fprintf(w, "<p>Stupid simple pastebin service</p>\n")
+				fmt.Fprintf(w, "<p>Pasta link: <a href=\"%s\">%s</a></p>\n", url, url)
+				fmt.Fprintf(w, "<h2>Token</h2>\n")
+				fmt.Fprintf(w, "<pre>%s</pre>\n", pasta.Token)
+				fmt.Fprintf(w, "<p>Use the token to modify your pasta</p>\n")
+				fmt.Fprintf(w, "</body></html>")
+			} else {
+				// Dont use json package, the reply is simple enough to build it on-the-fly
+				reply := fmt.Sprintf("{\"url\":\"%s\",\"token\":\"%s\"}", url, pasta.Token)
+				w.Write([]byte(reply))
+			}
 		}
 	}
 }
@@ -205,8 +274,8 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<body>\n")
 	fmt.Fprintf(w, "<h1>pasta</h1>\n")
 	fmt.Fprintf(w, "<p>Stupid simple pastebin service</p>\n")
-	fmt.Fprintf(w, "<form enctype=\"multipart/form-data\" method=\"post\">\n")
-	fmt.Fprintf(w, "<input type=\"file\" name=\"file\" name=\"filename\">\n")
+	fmt.Fprintf(w, "<form enctype=\"multipart/form-data\" method=\"post\" action=\"/?ret=html\">\n")
+	fmt.Fprintf(w, "<input type=\"file\" name=\"file\">\n")
 	fmt.Fprintf(w, "<input type=\"submit\" value=\"Upload\">\n")
 	fmt.Fprintf(w, "</form>\n")
 	fmt.Fprintf(w, "</body></html>")
@@ -218,8 +287,9 @@ func main() {
 	cf.BaseUrl = "http://localhost:8199"
 	cf.PastaDir = "pastas/"
 	cf.BindAddr = "127.0.0.1:8199"
-	cf.MaxBinSize = 1024 * 1024 * 25 // Default max size: 25 MB
-	cf.BinCharacters = 8             // Note: Never use less than 8 characters!
+	cf.MaxPastaSize = 1024 * 1024 * 25 // Default max size: 25 MB
+	cf.PastaCharacters = 8             // Note: Never use less than 8 characters!
+	cf.MimeTypesFile = "mime.types"
 	rand.Seed(time.Now().Unix())
 	fmt.Println("Starting pasta server ... ")
 	if FileExists(configFile) {
@@ -232,8 +302,8 @@ func main() {
 	}
 
 	// Sanity check
-	if cf.BinCharacters < 8 {
-		log.Println("Warning: Using less than 8 bin characters is recommended and might lead to unintended side-effects")
+	if cf.PastaCharacters < 8 {
+		log.Println("Warning: Using less than 8 pasta characters is not recommended and might lead to unintended side-effects")
 	}
 	if cf.PastaDir == "" {
 		cf.PastaDir = "."
@@ -241,10 +311,22 @@ func main() {
 	bowl.Directory = cf.PastaDir
 	os.Mkdir(bowl.Directory, os.ModePerm)
 
+	// Load MIME types file
+	if cf.MimeTypesFile == "" {
+		mimeExtensions = make(map[string]string, 0)
+	} else {
+		var err error
+		mimeExtensions, err = loadMimeTypes(cf.MimeTypesFile)
+		if err != nil {
+			log.Printf("Warning: Cannot load mime types file '%s': %s", cf.MimeTypesFile, err)
+		} else {
+			log.Printf("Loaded %d mime types", len(mimeExtensions))
+		}
+	}
+
 	// Setup webserver
-	log.Printf("Webserver initialization: http://%s", cf.BindAddr)
 	http.HandleFunc("/", handler)
 	http.HandleFunc("/health", handlerHealth)
-	log.Printf("Startup completed. Serving http://%s", cf.BindAddr)
+	log.Printf("Serving http://%s", cf.BindAddr)
 	log.Fatal(http.ListenAndServe(cf.BindAddr, nil))
 }
