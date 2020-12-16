@@ -27,6 +27,8 @@ type Config struct {
 	MaxPastaSize    int64  `toml:"MaxPastaSize"` // Max bin size in bytes
 	PastaCharacters int    `toml:"PastaCharacters"`
 	MimeTypesFile   string `toml:"MimeTypes` // Load mime types from this file
+	DefaultExpire   int64  `toml:"Expire"`   // Default TTL for a new pasta in seconds
+	CleanupInterval int    `toml:"Cleanup"`  // Seconds between cleanup cycles
 }
 
 var cf Config
@@ -73,6 +75,13 @@ func loadMimeTypes(filename string) (map[string]string, error) {
 	return ret, scanner.Err()
 }
 
+func takeFirst(arr []string) string {
+	if len(arr) == 0 {
+		return ""
+	}
+	return arr[0]
+}
+
 func SendPasta(pasta Pasta, w http.ResponseWriter) error {
 	file, err := bowl.GetPastaReader(pasta.Id)
 	if err != nil {
@@ -80,17 +89,49 @@ func SendPasta(pasta Pasta, w http.ResponseWriter) error {
 	}
 	defer file.Close()
 	w.Header().Set("Content-Length", strconv.FormatInt(pasta.Size, 10))
-	// TODO: Only add attachment file if download is set
-	/*
-		if pasta.AttachmentFilename != "" {
-			w.Header().Set("Content-Type", pasta.AttachmentFilename)
-		}
-	*/
 	if pasta.Mime != "" {
 		w.Header().Set("Content-Type", pasta.Mime)
 	}
 	_, err = io.Copy(w, file)
 	return err
+}
+
+func deletePasta(id string, token string, w http.ResponseWriter) {
+	var pasta Pasta
+	var err error
+	if id == "" || token == "" {
+		goto Invalid
+	}
+	pasta, err = bowl.GetPasta(id)
+	if err != nil {
+		log.Fatalf("Error getting pasta %s: %s", pasta.Id, err)
+		goto ServerError
+	}
+	if pasta.Id == "" {
+		goto NotFound
+	}
+	if pasta.Token == token {
+		err = bowl.DeletePasta(pasta.Id)
+		if err != nil {
+			log.Fatalf("Error deleting pasta %s: %s", pasta.Id, err)
+			goto ServerError
+		}
+		fmt.Fprintf(w, "OK")
+	} else {
+		goto Invalid
+	}
+	return
+NotFound:
+	w.WriteHeader(404)
+	fmt.Fprintf(w, "err: pasta not found")
+	return
+Invalid:
+	w.WriteHeader(403)
+	fmt.Fprintf(w, "err: Invalid request")
+	return
+ServerError:
+	w.WriteHeader(500)
+	fmt.Fprintf(w, "err: Server error")
 }
 
 func receiveBody(reader io.Reader, pasta *Pasta) error {
@@ -144,22 +185,43 @@ func receiveMultibody(r *http.Request, pasta *Pasta) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
-	pasta.AttachmentFilename = header.Filename
+	filename := header.Filename
 	// Determine MIME type based on file extension, if present
-	if pasta.AttachmentFilename != "" {
-		pasta.Mime = mimeByFilename(pasta.AttachmentFilename)
+	if filename != "" {
+		pasta.Mime = mimeByFilename(filename)
 	}
 	return file, err
+}
+
+/* Parse expire header value. Returns expire value or 0 on error or invalid settings */
+func parseExpire(headerValue []string) int64 {
+	var ret int64
+	for _, value := range headerValue {
+		if expire, err := strconv.ParseInt(value, 10, 64); err == nil {
+			// No negative values allowed
+			if expire < 0 {
+				return 0
+			}
+			ret = time.Now().Unix() + int64(expire)
+		}
+	}
+	return ret
 }
 
 func ReceivePasta(r *http.Request) (Pasta, error) {
 	var err error
 	pasta := Pasta{Id: ""}
 
-	// TODO: Use suggested ID from http header if present
+	// Pase expire if given
+	if cf.DefaultExpire > 0 {
+		pasta.ExpireDate = time.Now().Unix() + cf.DefaultExpire
+	}
+	if expire := parseExpire(r.Header["Expire"]); expire > 0 {
+		pasta.ExpireDate = expire
+	}
 
 	pasta.Id = bowl.GenerateRandomBinId(cf.PastaCharacters)
-	// Note InsertPasta sets the filename
+	// InsertPasta sets filename
 	if err = bowl.InsertPasta(&pasta); err != nil {
 		return pasta, err
 	}
@@ -170,6 +232,7 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 		// Otherwise assume the message body is the upload content
 		reader = r.Body
 	} else {
+		// Still close body, also if it's not set as reader
 		defer r.Body.Close()
 	}
 	defer reader.Close()
@@ -182,7 +245,6 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 		return pasta, errors.New("Bin size exceeded")
 	}
 	if pasta.Size == 0 {
-		// This is invalid
 		bowl.DeletePasta(pasta.Id)
 		pasta.Id = ""
 		pasta.Filename = ""
@@ -220,11 +282,15 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "<!doctype html><html><head><title>pasta</title></head>\n")
 				fmt.Fprintf(w, "<body>\n")
 				fmt.Fprintf(w, "<h1>pasta</h1>\n")
-				fmt.Fprintf(w, "<p>Stupid simple pastebin service</p>\n")
-				fmt.Fprintf(w, "<p>Pasta link: <a href=\"%s\">%s</a></p>\n", url, url)
-				fmt.Fprintf(w, "<h2>Token</h2>\n")
-				fmt.Fprintf(w, "<pre>%s</pre>\n", pasta.Token)
-				fmt.Fprintf(w, "<p>Use the token to modify your pasta</p>\n")
+				fmt.Fprintf(w, "<p>Here's your pasta: <a href=\"%s\">%s</a>", url, url)
+				if pasta.ExpireDate > 0 {
+					fmt.Fprintf(w, ". The pasta will expire on %s", time.Unix(pasta.ExpireDate, 0).Format("2006-01-02-15:04:05"))
+				}
+				fmt.Fprintf(w, "</p>\n")
+				fmt.Fprintf(w, "<h3>Actions</h3>\n")
+				fmt.Fprintf(w, "<p>Modification token: <code>%s</code></p>\n", pasta.Token)
+				deleteLink := fmt.Sprintf("%s/delete?id=%s&token=%s", cf.BaseUrl, pasta.Id, pasta.Token)
+				fmt.Fprintf(w, "<p>Accidentally uploaded a file? <a href=\"%s\">Click here to delete it</a> right away</p>\n", deleteLink)
 				fmt.Fprintf(w, "</body></html>")
 			} else {
 				// Dont use json package, the reply is simple enough to build it on-the-fly
@@ -250,8 +316,16 @@ func handler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if pasta.Id == "" {
-				fmt.Fprintf(w, "No such pasta: %s", id)
+				goto NoSuchPasta
 			} else {
+				// Delete expired pasta if present
+				if pasta.Expired() {
+					if err = bowl.DeletePasta(pasta.Id); err != nil {
+						log.Fatalf("Cannot deleted expired pasta %s: %s", pasta.Id, err)
+					}
+					goto NoSuchPasta
+				}
+
 				if err = SendPasta(pasta, w); err != nil {
 					log.Printf("Error sending pasta %s: %s", pasta.Id, err)
 				}
@@ -259,14 +333,30 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		}
 	} else if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		handlerPost(w, r)
+	} else if r.Method == http.MethodDelete {
+		id := ExtractPastaId(r.URL.Path)
+		token := takeFirst(r.URL.Query()["token"])
+		deletePasta(id, token, w)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte("Unsupported method"))
 	}
+	return
+NoSuchPasta:
+	w.WriteHeader(404)
+	fmt.Fprintf(w, "err: No pasta\n\nSorry, there is no pasta for this link")
+	return
 }
 
 func handlerHealth(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "OK")
+}
+
+// Delete pasta
+func handlerDelete(w http.ResponseWriter, r *http.Request) {
+	id := takeFirst(r.URL.Query()["id"])
+	token := takeFirst(r.URL.Query()["token"])
+	deletePasta(id, token, w)
 }
 
 func handlerIndex(w http.ResponseWriter, r *http.Request) {
@@ -281,6 +371,19 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "</body></html>")
 }
 
+func cleanupThread() {
+	for {
+		duration := time.Now().Unix()
+		if err := bowl.RemoveExpired(); err != nil {
+			log.Fatalf("Error while removing expired pastas: %s", err)
+		}
+		duration = time.Now().Unix() - duration + int64(cf.CleanupInterval)
+		if duration > 0 {
+			time.Sleep(time.Duration(cf.CleanupInterval) * time.Second)
+		}
+	}
+}
+
 func main() {
 	configFile := "pastad.toml"
 	// Set defaults
@@ -290,6 +393,8 @@ func main() {
 	cf.MaxPastaSize = 1024 * 1024 * 25 // Default max size: 25 MB
 	cf.PastaCharacters = 8             // Note: Never use less than 8 characters!
 	cf.MimeTypesFile = "mime.types"
+	cf.DefaultExpire = 0
+	cf.CleanupInterval = 60 * 60 // Default cleanup is once per hour
 	rand.Seed(time.Now().Unix())
 	fmt.Println("Starting pasta server ... ")
 	if FileExists(configFile) {
@@ -324,9 +429,15 @@ func main() {
 		}
 	}
 
+	// Start cleanup thread
+	if cf.CleanupInterval > 0 {
+		go cleanupThread()
+	}
+
 	// Setup webserver
 	http.HandleFunc("/", handler)
 	http.HandleFunc("/health", handlerHealth)
+	http.HandleFunc("/delete", handlerDelete)
 	log.Printf("Serving http://%s", cf.BindAddr)
 	log.Fatal(http.ListenAndServe(cf.BindAddr, nil))
 }

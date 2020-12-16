@@ -5,20 +5,29 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/rand"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Pasta struct {
-	Id                 string // id of the pasta
-	Token              string // modification token
-	Filename           string // filename for the pasta on the disk
-	ExpireDate         int64  // Unix() date when it will expire
-	Size               int64  // file size
-	Mime               string // mime type
-	AttachmentFilename string // filename of the uploaded file
+	Id         string // id of the pasta
+	Token      string // modification token
+	Filename   string // filename for the pasta on the disk
+	ExpireDate int64  // Unix() date when it will expire
+	Size       int64  // file size
+	Mime       string // mime type
+}
+
+func (pasta *Pasta) Expired() bool {
+	if pasta.ExpireDate == 0 {
+		return false
+	} else {
+		return time.Now().Unix() > pasta.ExpireDate
+	}
 }
 
 func RandomString(n int) string {
@@ -49,6 +58,30 @@ func (bowl *PastaBowl) filename(id string) string {
 
 func (bowl *PastaBowl) Exists(id string) bool {
 	return FileExists(bowl.filename(id))
+}
+
+/** Check for expired pastas and delete them */
+func (bowl *PastaBowl) RemoveExpired() error {
+	files, err := ioutil.ReadDir(bowl.Directory)
+	if err != nil {
+		return err
+	}
+	for _, file := range files {
+		if file.Size() == 0 {
+			continue
+		}
+		pasta, err := bowl.GetPasta(file.Name())
+		if err != nil {
+			return err
+		}
+		if pasta.Expired() {
+			if err := bowl.DeletePasta(pasta.Id); err != nil {
+				return err
+			}
+			fmt.Printf("Deleted expired pasta %s\n", pasta.Id)
+		}
+	}
+	return nil
 }
 
 // get pasta metadata
@@ -91,8 +124,6 @@ func (bowl *PastaBowl) GetPasta(id string) (Pasta, error) {
 			pasta.ExpireDate, _ = strconv.ParseInt(value, 10, 64)
 		} else if name == "mime" {
 			pasta.Mime = value
-		} else if name == "filename" {
-			pasta.AttachmentFilename = value
 		}
 
 	}
@@ -175,11 +206,7 @@ func (bowl *PastaBowl) InsertPasta(pasta *Pasta) error {
 			return err
 		}
 	}
-	if pasta.AttachmentFilename != "" {
-		if _, err := file.Write([]byte(fmt.Sprintf("filename:%s\n", pasta.AttachmentFilename))); err != nil {
-			return err
-		}
-	}
+
 	if _, err := file.Write([]byte("---\n")); err != nil {
 		return err
 	}
