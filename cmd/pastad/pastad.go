@@ -123,15 +123,15 @@ func deletePasta(id string, token string, w http.ResponseWriter) {
 	return
 NotFound:
 	w.WriteHeader(404)
-	fmt.Fprintf(w, "err: pasta not found")
+	fmt.Fprintf(w, "pasta not found")
 	return
 Invalid:
 	w.WriteHeader(403)
-	fmt.Fprintf(w, "err: Invalid request")
+	fmt.Fprintf(w, "Invalid request")
 	return
 ServerError:
 	w.WriteHeader(500)
-	fmt.Fprintf(w, "err: Server error")
+	fmt.Fprintf(w, "Server error")
 }
 
 func receiveBody(reader io.Reader, pasta *Pasta) error {
@@ -256,6 +256,37 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	return pasta, nil
 }
 
+func handlerHead(w http.ResponseWriter, r *http.Request) {
+	var pasta Pasta
+	id := ExtractPastaId(r.URL.Path)
+	if pasta, err := bowl.GetPasta(id); err != nil {
+		log.Fatalf("Error getting pasta %s: %s", pasta.Id, err)
+		goto ServerError
+	}
+	if pasta.Id == "" {
+		goto NotFound
+	}
+
+	w.Header().Set("Content-Length", strconv.FormatInt(pasta.Size, 10))
+	if pasta.Mime != "" {
+		w.Header().Set("Content-Type", pasta.Mime)
+	}
+	if pasta.ExpireDate > 0 {
+		w.Header().Set("Expires", time.Unix(pasta.ExpireDate, 0).Format("2006-01-02-15:04:05"))
+	}
+	w.WriteHeader(200)
+	fmt.Fprintf(w, "OK")
+	return
+ServerError:
+	w.WriteHeader(500)
+	fmt.Fprintf(w, "Server error")
+	return
+NotFound:
+	w.WriteHeader(404)
+	fmt.Fprintf(w, "pasta not found")
+	return
+}
+
 func handlerPost(w http.ResponseWriter, r *http.Request) {
 	pasta, err := ReceivePasta(r)
 	if err != nil {
@@ -337,6 +368,8 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		id := ExtractPastaId(r.URL.Path)
 		token := takeFirst(r.URL.Query()["token"])
 		deletePasta(id, token, w)
+	} else if r.Method == http.MethodHead {
+		handlerHead(w, r)
 	} else {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte("Unsupported method"))
@@ -344,7 +377,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	return
 NoSuchPasta:
 	w.WriteHeader(404)
-	fmt.Fprintf(w, "err: No pasta\n\nSorry, there is no pasta for this link")
+	fmt.Fprintf(w, "No pasta\n\nSorry, there is no pasta for this link")
 	return
 }
 
