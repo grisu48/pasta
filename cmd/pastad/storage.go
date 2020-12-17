@@ -78,7 +78,6 @@ func (bowl *PastaBowl) RemoveExpired() error {
 			if err := bowl.DeletePasta(pasta.Id); err != nil {
 				return err
 			}
-			fmt.Printf("Deleted expired pasta %s\n", pasta.Id)
 		}
 	}
 	return nil
