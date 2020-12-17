@@ -322,15 +322,14 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "<!doctype html><html><head><title>pasta</title></head>\n")
 				fmt.Fprintf(w, "<body>\n")
 				fmt.Fprintf(w, "<h1>pasta</h1>\n")
-				fmt.Fprintf(w, "<p>Here's your pasta: <a href=\"%s\">%s</a>", url, url)
+				fmt.Fprintf(w, "<p><a href=\"%s\">%s</a>", url, url)
 				if pasta.ExpireDate > 0 {
-					fmt.Fprintf(w, ". The pasta will expire on %s", time.Unix(pasta.ExpireDate, 0).Format("2006-01-02-15:04:05"))
+					fmt.Fprintf(w, " (expires %s)", time.Unix(pasta.ExpireDate, 0).Format("2006-01-02-15:04:05"))
 				}
 				fmt.Fprintf(w, "</p>\n")
-				fmt.Fprintf(w, "<h3>Actions</h3>\n")
-				fmt.Fprintf(w, "<p>Modification token: <code>%s</code></p>\n", pasta.Token)
 				deleteLink := fmt.Sprintf("%s/delete?id=%s&token=%s", cf.BaseUrl, pasta.Id, pasta.Token)
-				fmt.Fprintf(w, "<p>Accidentally uploaded a file? <a href=\"%s\">Click here to delete it</a> right away</p>\n", deleteLink)
+				fmt.Fprintf(w, "<p>Accidentally uploaded? <a href=\"%s\">Delete it</a> right away</p>\n", deleteLink)
+				fmt.Fprintf(w, "<p>Modification token: <code>%s</code></p>\n", pasta.Token)
 				fmt.Fprintf(w, "</body></html>")
 			} else if retFormat == "json" {
 				// Dont use json package, the reply is simple enough to build it on-the-fly
@@ -412,9 +411,12 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<!doctype html><html><head><title>pasta</title></head>\n")
 	fmt.Fprintf(w, "<body>\n")
 	fmt.Fprintf(w, "<h1>pasta</h1>\n")
-	fmt.Fprintf(w, "<p>Stupid simple pastebin service</p>\n")
-	fmt.Fprintf(w, "<p>Post a file: <code>curl -X POST '%s' --data-binary @FILE</code></p>\n", cf.BaseUrl)
-	fmt.Fprintf(w, "<h3>File upload form</h3>\n")
+	fmt.Fprintf(w, "<p>Stupid simple pastebin service written in go. Visit the project repo on <a href=\"https://github.com/grisu48/pasta\" target=\"_BLANK\">Github</a>.</p>\n")
+	fmt.Fprintf(w, "<h3>Post a file</h3>\n")
+	//fmt.Fprintf(w, "<p> </p>");
+	fmt.Fprintf(w, "<p>Just shove your file via POST request to the main page :</p>")
+	fmt.Fprintf(w, "<pre>curl -X POST '%s' --data-binary @FILE</pre>\n", cf.BaseUrl)
+	fmt.Fprintf(w, "<p>Or use the following upload form</p>")
 	fmt.Fprintf(w, "<form enctype=\"multipart/form-data\" method=\"post\" action=\"/?ret=html\">\n")
 	fmt.Fprintf(w, "<input type=\"file\" name=\"file\">\n")
 	fmt.Fprintf(w, "<input type=\"submit\" value=\"Upload\">\n")
