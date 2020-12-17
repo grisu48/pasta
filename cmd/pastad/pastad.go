@@ -408,6 +408,8 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<body>\n")
 	fmt.Fprintf(w, "<h1>pasta</h1>\n")
 	fmt.Fprintf(w, "<p>Stupid simple pastebin service</p>\n")
+	fmt.Fprintf(w, "<p>Post a file: <code>curl -X POST '%s' --data-binary @FILE</code></p>\n", cf.BaseUrl)
+	fmt.Fprintf(w, "<h3>File upload form</h3>\n")
 	fmt.Fprintf(w, "<form enctype=\"multipart/form-data\" method=\"post\" action=\"/?ret=html\">\n")
 	fmt.Fprintf(w, "<input type=\"file\" name=\"file\">\n")
 	fmt.Fprintf(w, "<input type=\"submit\" value=\"Upload\">\n")
