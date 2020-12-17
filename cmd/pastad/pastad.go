@@ -332,10 +332,12 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 				deleteLink := fmt.Sprintf("%s/delete?id=%s&token=%s", cf.BaseUrl, pasta.Id, pasta.Token)
 				fmt.Fprintf(w, "<p>Accidentally uploaded a file? <a href=\"%s\">Click here to delete it</a> right away</p>\n", deleteLink)
 				fmt.Fprintf(w, "</body></html>")
-			} else {
+			} else if retFormat == "json" {
 				// Dont use json package, the reply is simple enough to build it on-the-fly
 				reply := fmt.Sprintf("{\"url\":\"%s\",\"token\":\"%s\"}", url, pasta.Token)
 				w.Write([]byte(reply))
+			} else {
+				fmt.Fprintf(w, "url:   %s\ntoken: %s\n", url, pasta.Token)
 			}
 		}
 	}

@@ -46,7 +46,7 @@ func usage() {
 
 func push(src io.Reader) (Pasta, error) {
 	pasta := Pasta{}
-	resp, err := http.Post(cf.RemoteHost, "text/plain", src)
+	resp, err := http.Post(cf.RemoteHost+"?ret=json", "text/plain", src)
 	if err != nil {
 		return pasta, err
 	}
