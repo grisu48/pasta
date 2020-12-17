@@ -47,7 +47,7 @@ The container needs a `data` directory with a valid `pastad.toml` (See the [exam
 
 Assuing the server runs on http://localhost:8199, you can use the `pasta` tool or simply `curl` :
 
-    curl -X POST 'http://localhost:8199' -d @README.md
+    curl -X POST 'http://localhost:8199' --data-binary @README.md
 
 ## pasta CLI
 

@@ -131,7 +131,7 @@ Invalid:
 	return
 ServerError:
 	w.WriteHeader(500)
-	fmt.Fprintf(w, "Server error")
+	fmt.Fprintf(w, "server error")
 }
 
 func receiveBody(reader io.Reader, pasta *Pasta) error {
@@ -208,8 +208,15 @@ func parseExpire(headerValue []string) int64 {
 	return ret
 }
 
+/* isMultipart returns true if the given request is multipart form */
+func isMultipart(r *http.Request) bool {
+	contentType := r.Header.Get("Content-Type")
+	return contentType == "multipart/form-data" || strings.HasPrefix(contentType, "multipart/form-data;")
+}
+
 func ReceivePasta(r *http.Request) (Pasta, error) {
 	var err error
+	var reader io.ReadCloser
 	pasta := Pasta{Id: ""}
 
 	// Pase expire if given
@@ -226,14 +233,16 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 		return pasta, err
 	}
 
-	// Try multipart upload
-	reader, err := receiveMultibody(r, &pasta)
-	if err != nil {
-		// Otherwise assume the message body is the upload content
-		reader = r.Body
-	} else {
-		// Still close body, also if it's not set as reader
+	if isMultipart(r) {
+		// Close body, also if it's not set as reader
 		defer r.Body.Close()
+		reader, err = receiveMultibody(r, &pasta)
+		if err != nil {
+			return pasta, err
+		}
+	} else {
+		// Otherwise the message body is the upload content
+		reader = r.Body
 	}
 	defer reader.Close()
 
@@ -279,7 +288,7 @@ func handlerHead(w http.ResponseWriter, r *http.Request) {
 	return
 ServerError:
 	w.WriteHeader(500)
-	fmt.Fprintf(w, "Server error")
+	fmt.Fprintf(w, "server error")
 	return
 NotFound:
 	w.WriteHeader(404)
@@ -291,13 +300,13 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 	pasta, err := ReceivePasta(r)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "Server error")
+		fmt.Fprintf(w, "server error")
 		log.Printf("Receive error: %s", err)
 		return
 	} else {
 		if pasta.Id == "" {
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("error: empty pasta"))
+			w.Write([]byte("empty pasta"))
 		} else {
 			log.Printf("Received bin %s (%d bytes) from %s", pasta.Id, pasta.Size, r.RemoteAddr)
 			w.WriteHeader(http.StatusOK)
