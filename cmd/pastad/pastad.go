@@ -396,6 +396,11 @@ func handlerHealth(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "OK")
 }
 
+func handlerRobots(w http.ResponseWriter, r *http.Request) {
+	// no robots allowed here
+	fmt.Fprintf(w, "User-agent: *\nDisallow: /\n")
+}
+
 // Delete pasta
 func handlerDelete(w http.ResponseWriter, r *http.Request) {
 	id := takeFirst(r.URL.Query()["id"])
@@ -484,6 +489,7 @@ func main() {
 	http.HandleFunc("/", handler)
 	http.HandleFunc("/health", handlerHealth)
 	http.HandleFunc("/delete", handlerDelete)
+	http.HandleFunc("/robots.txt", handlerRobots)
 	log.Printf("Serving http://%s", cf.BindAddr)
 	log.Fatal(http.ListenAndServe(cf.BindAddr, nil))
 }
