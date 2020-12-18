@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/grisu48/pasta.svg?branch=main)](https://travis-ci.org/grisu48/pasta)
+![Build status badge](https://github.com/grisu48/pasta/workflows/pastad/badge.svg)
 
 # pasta
 
