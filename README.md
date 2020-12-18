@@ -2,7 +2,9 @@
 
 # pasta
 
-Stupid simple pastebin service written in go
+Stupid simple pastebin service written in go.
+
+Fastest way of deploying is via the [`deploy_pasta.sh`](deploy_pasta.sh) script.
 
 ## Run via docker
 
@@ -16,7 +18,7 @@ Assuming your data is in `/srv/pasta/` you can do
 
     docker container run -d -v /srv/pasta:/data -p 127.0.0.1:8199:8199 grisu48/pasta
 
-Configure your reverse proxy (e.g. `nginx`) then accordingly.
+Configure your reverse proxy (e.g. `nginx`) then accordingly. I don't recomment to publish `pastad` on port 80 without a reverse proxy.
 
 ## Build and run
 
