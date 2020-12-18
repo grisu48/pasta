@@ -9,7 +9,7 @@ pasta: cmd/pasta/pasta.go cmd/pasta/storage.go
 pastad: cmd/pastad/pastad.go cmd/pastad/storage.go
 	go build $^
 
-test: pastad
+test: pastad pasta
 	go test ./...
 	# TODO: This syntax is horrible :-)
 	bash -c 'cd test && ./test.sh'
