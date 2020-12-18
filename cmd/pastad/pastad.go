@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
 	"net/http"
 	"os"
 	"strconv"
@@ -413,7 +412,6 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<h1>pasta</h1>\n")
 	fmt.Fprintf(w, "<p>Stupid simple pastebin service written in go. Visit the project repo on <a href=\"https://github.com/grisu48/pasta\" target=\"_BLANK\">Github</a>.</p>\n")
 	fmt.Fprintf(w, "<h3>Post a file</h3>\n")
-	//fmt.Fprintf(w, "<p> </p>");
 	fmt.Fprintf(w, "<p>Just shove your file via POST request to the main page :</p>")
 	fmt.Fprintf(w, "<pre>curl -X POST '%s' --data-binary @FILE</pre>\n", cf.BaseUrl)
 	fmt.Fprintf(w, "<p>Or use the following upload form</p>")
@@ -425,6 +423,10 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func cleanupThread() {
+	// Double check this, because I know that I will screw this up at some point in the main routine :-)
+	if cf.CleanupInterval == 0 {
+		return
+	}
 	for {
 		duration := time.Now().Unix()
 		if err := bowl.RemoveExpired(); err != nil {
@@ -433,6 +435,9 @@ func cleanupThread() {
 		duration = time.Now().Unix() - duration + int64(cf.CleanupInterval)
 		if duration > 0 {
 			time.Sleep(time.Duration(cf.CleanupInterval) * time.Second)
+		} else {
+			// Don't spam the system, give it at least some time
+			time.Sleep(time.Second)
 		}
 	}
 }
@@ -448,7 +453,6 @@ func main() {
 	cf.MimeTypesFile = "mime.types"
 	cf.DefaultExpire = 0
 	cf.CleanupInterval = 60 * 60 // Default cleanup is once per hour
-	rand.Seed(time.Now().Unix())
 	fmt.Println("Starting pasta server ... ")
 	if FileExists(configFile) {
 		if _, err := toml.DecodeFile(configFile, &cf); err != nil {
@@ -461,7 +465,7 @@ func main() {
 
 	// Sanity check
 	if cf.PastaCharacters < 8 {
-		log.Println("Warning: Using less than 8 pasta characters is not recommended and might lead to unintended side-effects")
+		log.Println("Warning: Using less than 8 pasta characters might not be side-effects free")
 	}
 	if cf.PastaDir == "" {
 		cf.PastaDir = "."

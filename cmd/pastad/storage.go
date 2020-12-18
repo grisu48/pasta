@@ -2,11 +2,11 @@ package main
 
 import (
 	"bufio"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	"os"
 	"strconv"
 	"strings"
@@ -30,11 +30,50 @@ func (pasta *Pasta) Expired() bool {
 	}
 }
 
+func randBytes(n int) []byte {
+	buf := make([]byte, n)
+	i, err := rand.Read(buf)
+	if err != nil {
+		panic(err)
+	}
+	if i < n {
+		panic(fmt.Errorf("Random generator empty"))
+	}
+	return buf
+}
+
+func randInt8() int8 {
+	buf := randBytes(1)
+	return int8(buf[0])
+}
+
+func randInt() int {
+	buf := randBytes(4)
+	ret := 0
+	for i := 0; i < 4; i++ {
+		ret += int(buf[i]) << (i * 8)
+	}
+	return ret
+}
+
+func randByte() byte {
+	buf := make([]byte, 1)
+	n, err := rand.Read(buf)
+	if err != nil {
+		panic(err)
+	}
+	if n < 1 {
+		panic(fmt.Errorf("Random generator empty"))
+	}
+	return buf[0]
+}
+
 func RandomString(n int) string {
 	var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
 	b := make([]rune, n)
 	for i := range b {
-		b[i] = letterRunes[rand.Intn(len(letterRunes))]
+
+		b[i] = letterRunes[randInt()%len(letterRunes)]
 	}
 	return string(b)
 }
