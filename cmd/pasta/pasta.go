@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +22,16 @@ type Config struct {
 }
 
 var cf Config
+
+/* http error instance */
+type HttpError struct {
+	err        string
+	StatusCode int
+}
+
+func (e *HttpError) Error() string {
+	return e.err
+}
 
 func FileExists(filename string) bool {
 	_, err := os.Stat(filename)
@@ -61,6 +72,41 @@ func push(src io.Reader) (Pasta, error) {
 	return pasta, nil
 }
 
+func httpRequest(url string, method string) error {
+	client := &http.Client{}
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode == 200 {
+		return nil
+	} else {
+		// Try to fetch a small error message
+		buf := make([]byte, 200)
+		n, err := resp.Body.Read(buf)
+		if err != nil || n == 0 || n >= 200 {
+			return &HttpError{err: fmt.Sprintf("http code %d", resp.StatusCode), StatusCode: resp.StatusCode}
+		}
+		return &HttpError{err: fmt.Sprintf("http code %d: %s", resp.StatusCode, string(buf)), StatusCode: resp.StatusCode}
+	}
+}
+
+func rm(pasta Pasta) error {
+	url := fmt.Sprintf("%s?token=%s", pasta.Url, pasta.Token)
+	if err := httpRequest(url, "DELETE"); err != nil {
+		// Ignore 404 errors, because that means that the pasta is remove on the server (e.g. expired)
+		if strings.HasPrefix(err.Error(), "http code 404") {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func getFilename(filename string) string {
 	i := strings.LastIndex(filename, "/")
 	if i < 0 {
@@ -72,8 +118,8 @@ func getFilename(filename string) string {
 
 func main() {
 	cf.RemoteHost = "http://localhost:8199"
-	action := "push"
-	// Load configuration file if possible (swallow errors)
+	action := ""
+	// Load configuration file if possible
 	homeDir, _ := os.UserHomeDir()
 	configFile := homeDir + "/.pasta.toml"
 	if FileExists(configFile) {
@@ -107,6 +153,8 @@ func main() {
 				files = append(files, args[i])
 			} else if arg == "--ls" || arg == "--list" {
 				action = "list"
+			} else if arg == "--rm" || arg == "--remote" || arg == "--delete" {
+				action = "rm"
 			} else {
 				fmt.Fprintf(os.Stderr, "Invalid argument: %s\n", arg)
 				os.Exit(1)
@@ -122,7 +170,18 @@ func main() {
 	// Load stored pastas
 	stor, err := OpenStorage(homeDir + "/.pastas.dat")
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading stored pastas: %s\n", err)
+		fmt.Fprintf(os.Stderr, "Cannot open pasta storage: %s\n", err)
+	}
+
+	// Special action: "pasta ls" list pasta
+	if action == "" && len(files) == 1 && files[0] == "ls" {
+		action = "list"
+		files = make([]string, 0)
+	}
+	// Special action: "pasta rm" is the same as "pasta --rm"
+	if len(files) > 1 && files[0] == "rm" {
+		action = "rm"
+		files = files[1:]
 	}
 
 	if action == "push" || action == "" {
@@ -143,12 +202,17 @@ func main() {
 					os.Exit(1)
 				}
 				if err = stor.Append(pasta); err != nil {
-					fmt.Fprintf(os.Stderr, "Error writing pasta to local store: %s\n", err)
+					fmt.Fprintf(os.Stderr, "Cannot writing pasta to local store: %s\n", err)
 				}
-				fmt.Printf("%s - %s\n", pasta.Filename, pasta.Url)
+				// For a single file just print the link
+				if len(files) == 1 {
+					fmt.Printf("%s\n", pasta.Url)
+				} else {
+					fmt.Printf("%s - %s\n", pasta.Filename, pasta.Url)
+				}
 			}
 		} else {
-			fmt.Fprintln(os.Stderr, "No input file given - Reading from stdin")
+			fmt.Fprintln(os.Stderr, "Reading from stdin")
 			reader := bufio.NewReader(os.Stdin)
 			pasta, err := push(reader)
 			if err != nil {
@@ -156,19 +220,57 @@ func main() {
 				os.Exit(1)
 			}
 			if err = stor.Append(pasta); err != nil {
-				fmt.Fprintf(os.Stderr, "Error writing pasta to local store: %s\n", err)
+				fmt.Fprintf(os.Stderr, "Cannot writing pasta to local store: %s\n", err)
 			}
 			fmt.Println(pasta.Url)
 		}
-	} else if action == "list" {
-		fmt.Printf("%-30s   %-19s   %s\n", "Filename", "Date", "URL")
-		for _, pasta := range stor.Pastas {
-			t := time.Unix(pasta.Date, 0)
-			filename := pasta.Filename
-			if filename == "" {
-				filename = "<none>"
+	} else if action == "list" { // list known pastas
+		if len(stor.Pastas) > 0 {
+			fmt.Printf("Id   %-30s   %-19s   %s\n", "Filename", "Date", "URL")
+			for i, pasta := range stor.Pastas {
+				t := time.Unix(pasta.Date, 0)
+				filename := pasta.Filename
+				if filename == "" {
+					filename = "<none>"
+				}
+				fmt.Printf("%-3d  %-30s   %-19s   %s\n", i, filename, t.Format("2006-01-02 15:04:05"), pasta.Url)
 			}
-			fmt.Printf("%-30s   %-19s   %s\n", filename, t.Format("2006-01-02-15:04:05"), pasta.Url)
+		}
+	} else if action == "rm" { // remove pastas
+		// List of pastas to be deleted
+		spoiled := make([]Pasta, 0)
+		// Match given pastas and get tokens
+		for _, file := range files {
+			// If it is and integer, take the n-th item
+			if id, err := strconv.Atoi(file); err == nil {
+				if id < 0 || id >= len(stor.Pastas) {
+					fmt.Fprintf(os.Stderr, "Cannot find pasta '%d'\n", id)
+					os.Exit(1)
+				}
+				spoiled = append(spoiled, stor.Pastas[id])
+			} else {
+				if pasta, ok := stor.Get(file); ok {
+					spoiled = append(spoiled, pasta)
+				} else {
+					// Stop execution
+					fmt.Fprintf(os.Stderr, "Cannot find pasta '%s'\n", file)
+					os.Exit(1)
+				}
+			}
+		}
+
+		// Delete found pastas
+		for _, pasta := range spoiled {
+			if err := rm(pasta); err != nil {
+				fmt.Fprintf(os.Stderr, "Error deleting '%s': %s\n", pasta.Url, err)
+			} else {
+				fmt.Printf("Deleted: %s\n", pasta.Url)
+				stor.Remove(pasta.Url, pasta.Token) // Mark as removed for when rewriting storage
+			}
+		}
+		// And re-write storage
+		if err = stor.Write(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing to local storage: %s\n", err)
 		}
 	} else {
 		fmt.Fprintf(os.Stderr, "Unkown action: %s\n", action)
