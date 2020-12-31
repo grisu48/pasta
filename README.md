@@ -20,7 +20,22 @@ Assuming your data is in `/srv/pasta/` you can do
 
 Configure your reverse proxy (e.g. `nginx`) then accordingly. I don't recomment to publish `pastad` on port 80 without a reverse proxy.
 
-## Build and run
+## Run on RancherOS
+
+Let's assume we have `/dev/sda` for the system and `/dev/sdb` for data.
+
+* Prepare persistent storage for data
+* Install the system with given [`cloud-init.yaml`](cloud-init.yaml.example) to system storage
+* Configure your proxy and enojoy!
+
+```bash
+$ sudo parted /dev/sdb
+$ # mktable - gpt - mkpart - 0% - 100%
+$ sudo mkfs.ext4 /dev/sdb1
+$ sudo ros install -d /dev/sda -c cloud-init.yaml
+```
+
+## Build and run from source
 
     make pastad                                    # Server
     make pasta                                     # Client
