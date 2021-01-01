@@ -30,7 +30,7 @@ Let's assume we have `/dev/sda` for the system and `/dev/sdb` for data.
 
 ```bash
 $ sudo parted /dev/sdb
-$ # mktable - gpt - mkpart - 0% - 100%
+  # mktable - gpt - mkpart - 1 - 0% - 100%
 $ sudo mkfs.ext4 /dev/sdb1
 $ sudo ros install -d /dev/sda -c cloud-init.yaml
 ```

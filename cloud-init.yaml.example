@@ -15,7 +15,7 @@ write_files:
       Expire = 2592000                     # Default expire in seconds (1 Month)
       Cleanup = 3600                       # Cleanup interval in seconds (1 hour)
 runcmd:
-  - sudo wget https://raw.githubusercontent.com/pdostal/pasta/main/mime.types -O /data/mime.types
+  - sudo wget https://raw.githubusercontent.com/grisu48/pasta/main/mime.types -O /data/mime.types
 - sudo cp /mnt/pastad.toml /data/pastad.toml
 rancher:
   network:
@@ -26,10 +26,10 @@ rancher:
     interfaces:
       eth0:
         addresses:
-          - 172.16.0.2/24
-          - 2001:123:456::2/64
-        gateway: 172.16.0.1
-        gateway_ipv6: 2001:123:456::1
+          - 192.0.2.2/24
+          - 2001:db8::2/64
+        gateway: 192.0.2.1
+        gateway_ipv6: 2001:db8::1
         mtu: 1500
         dhcp: false
   services:
