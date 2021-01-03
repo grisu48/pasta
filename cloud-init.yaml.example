@@ -1,0 +1,43 @@
+ssh_authorized_keys:
+  - ssh-rsa ...
+mounts:
+  - ["/dev/sdb1", "/data", "ext4", ""]
+write_files:
+  - path: /mnt/pastad.toml
+    permissions: "0755"
+    owner: root
+    content: |
+      BaseURL = "https://pasta.domain.com" # replace with your hostname
+      PastaDir = "pastas"                  # absolute or relative path to the pastas
+      BindAddress = ":8199"                # server bind address
+      MaxPastaSize = 26214400              # max allowed pasta size - 5 MB
+      PastaCharacters = 8                  # Number of characters for pasta id
+      Expire = 2592000                     # Default expire in seconds (1 Month)
+      Cleanup = 3600                       # Cleanup interval in seconds (1 hour)
+runcmd:
+  - sudo wget https://raw.githubusercontent.com/grisu48/pasta/main/mime.types -O /data/mime.types
+- sudo cp /mnt/pastad.toml /data/pastad.toml
+rancher:
+  network:
+    dns:
+      nameservers:
+        - 8.8.8.8
+        - 1.1.1.1
+    interfaces:
+      eth0:
+        addresses:
+          - 192.0.2.2/24
+          - 2001:db8::2/64
+        gateway: 192.0.2.1
+        gateway_ipv6: 2001:db8::1
+        mtu: 1500
+        dhcp: false
+  services:
+    past:
+      image: grisu48/pasta
+      volumes:
+        - /data:/data
+      ports:
+        - "80:8199"
+      restart: always
+
