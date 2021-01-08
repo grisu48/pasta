@@ -1,6 +1,8 @@
 default: all
 all: pasta pastad
 
+.PHONY: all test clean
+
 requirements:
 	go get github.com/BurntSushi/toml
 	
