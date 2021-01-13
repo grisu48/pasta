@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/akamensky/argparse"
 )
 
 type Config struct {
@@ -26,13 +27,52 @@ type Config struct {
 	MaxPastaSize    int64  `toml:"MaxPastaSize"` // Max bin size in bytes
 	PastaCharacters int    `toml:"PastaCharacters"`
 	MimeTypesFile   string `toml:"MimeTypes` // Load mime types from this file
-	DefaultExpire   int64  `toml:"Expire"`   // Default TTL for a new pasta in seconds
+	DefaultExpire   int64  `toml:"Expire"`   // Default expire time for a new pasta in seconds
 	CleanupInterval int    `toml:"Cleanup"`  // Seconds between cleanup cycles
+}
+
+type ParserConfig struct {
+	ConfigFile      *string
+	BaseURL         *string
+	PastaDir        *string
+	BindAddr        *string
+	MaxPastaSize    *int // parser doesn't support int64
+	PastaCharacters *int
+	MimeTypesFile   *string
+	DefaultExpire   *int // parser doesn't support int64
+	CleanupInterval *int
 }
 
 var cf Config
 var bowl PastaBowl
 var mimeExtensions map[string]string
+
+func (pc *ParserConfig) ApplyTo(cf *Config) {
+	if pc.BaseURL != nil && *pc.BaseURL != "" {
+		cf.BaseUrl = *pc.BaseURL
+	}
+	if pc.PastaDir != nil && *pc.PastaDir != "" {
+		cf.PastaDir = *pc.PastaDir
+	}
+	if pc.BindAddr != nil && *pc.BindAddr != "" {
+		cf.BindAddr = *pc.BindAddr
+	}
+	if pc.MaxPastaSize != nil && *pc.MaxPastaSize > 0 {
+		cf.MaxPastaSize = int64(*pc.MaxPastaSize)
+	}
+	if pc.PastaCharacters != nil && *pc.PastaCharacters > 0 {
+		cf.PastaCharacters = *pc.PastaCharacters
+	}
+	if pc.MimeTypesFile != nil && *pc.MimeTypesFile != "" {
+		cf.MimeTypesFile = *pc.MimeTypesFile
+	}
+	if pc.DefaultExpire != nil && *pc.DefaultExpire > 0 {
+		cf.DefaultExpire = int64(*pc.DefaultExpire)
+	}
+	if pc.CleanupInterval != nil && *pc.CleanupInterval > 0 {
+		cf.CleanupInterval = *pc.CleanupInterval
+	}
+}
 
 func ExtractPastaId(path string) string {
 	i := strings.LastIndex(path, "/")
@@ -443,7 +483,6 @@ func cleanupThread() {
 }
 
 func main() {
-	configFile := "pastad.toml"
 	// Set defaults
 	cf.BaseUrl = "http://localhost:8199"
 	cf.PastaDir = "pastas/"
@@ -453,8 +492,25 @@ func main() {
 	cf.MimeTypesFile = "mime.types"
 	cf.DefaultExpire = 0
 	cf.CleanupInterval = 60 * 60 // Default cleanup is once per hour
+	// Parse program arguments for config
+	parseCf := ParserConfig{}
+	parser := argparse.NewParser("pastad", "pasta server")
+	parseCf.ConfigFile = parser.String("c", "config", &argparse.Options{Default: "pastad.toml", Help: "Set config file"})
+	parseCf.BaseURL = parser.String("B", "baseurl", &argparse.Options{Help: "Set base URL for instance"})
+	parseCf.PastaDir = parser.String("d", "dir", &argparse.Options{Help: "Set pasta data directory"})
+	parseCf.BindAddr = parser.String("b", "bind", &argparse.Options{Help: "Address to bind server to"})
+	parseCf.MaxPastaSize = parser.Int("s", "size", &argparse.Options{Help: "Maximum allowed size for a pasta"})
+	parseCf.PastaCharacters = parser.Int("n", "chars", &argparse.Options{Help: "Random characters for new pastas"})
+	parseCf.MimeTypesFile = parser.String("m", "mime", &argparse.Options{Help: "Define mime types file"})
+	parseCf.DefaultExpire = parser.Int("e", "expire", &argparse.Options{Help: "Pasta expire in seconds"})
+	parseCf.CleanupInterval = parser.Int("C", "cleanup", &argparse.Options{Help: "Cleanup interval in seconds"})
+	if err := parser.Parse(os.Args); err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", parser.Usage(err))
+		os.Exit(1)
+	}
 	fmt.Println("Starting pasta server ... ")
-	if FileExists(configFile) {
+	configFile := *parseCf.ConfigFile
+	if configFile != "" && FileExists(configFile) {
 		if _, err := toml.DecodeFile(configFile, &cf); err != nil {
 			fmt.Printf("Error loading configuration file: %s\n", err)
 			os.Exit(1)
@@ -462,8 +518,14 @@ func main() {
 	} else {
 		fmt.Fprintf(os.Stderr, "Warning: Config file '%s' not found\n", configFile)
 	}
+	// Program arguments overwrite config file
+	parseCf.ApplyTo(&cf)
 
 	// Sanity check
+	if cf.PastaCharacters <= 0 {
+		log.Println("Setting pasta characters to default 8 because it was <= 0")
+		cf.PastaCharacters = 8
+	}
 	if cf.PastaCharacters < 8 {
 		log.Println("Warning: Using less than 8 pasta characters might not be side-effects free")
 	}

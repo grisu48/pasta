@@ -1,8 +1,11 @@
 default: all
 all: pasta pastad
 
+.PHONY: all test clean
+
 requirements:
 	go get github.com/BurntSushi/toml
+	go get github.com/akamensky/argparse
 	
 pasta: cmd/pasta/pasta.go cmd/pasta/storage.go
 	go build $^

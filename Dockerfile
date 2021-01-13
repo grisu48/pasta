@@ -10,5 +10,6 @@ RUN mkdir /app
 RUN mkdir /data
 WORKDIR /data
 COPY --from=build-env /app/pastad /app/pastad
-ENTRYPOINT /app/pastad
+COPY --from=build-env /app/mime.types /app/mime.types
+ENTRYPOINT /app/pastad -m /app/mime.types -c /data/pastad.toml
 VOLUME ["/data"]
