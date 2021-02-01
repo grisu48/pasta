@@ -14,6 +14,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -26,9 +27,10 @@ type Config struct {
 	BindAddr        string `toml:"BindAddress"`
 	MaxPastaSize    int64  `toml:"MaxPastaSize"` // Max bin size in bytes
 	PastaCharacters int    `toml:"PastaCharacters"`
-	MimeTypesFile   string `toml:"MimeTypes` // Load mime types from this file
-	DefaultExpire   int64  `toml:"Expire"`   // Default expire time for a new pasta in seconds
-	CleanupInterval int    `toml:"Cleanup"`  // Seconds between cleanup cycles
+	MimeTypesFile   string `toml:"MimeTypes`     // Load mime types from this file
+	DefaultExpire   int64  `toml:"Expire"`       // Default expire time for a new pasta in seconds
+	CleanupInterval int    `toml:"Cleanup"`      // Seconds between cleanup cycles
+	RequestDelay    int64  `toml:"RequestDelay"` // Required delay between requests in milliseconds
 }
 
 type ParserConfig struct {
@@ -304,6 +306,47 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	return pasta, nil
 }
 
+var delays map[string]int64
+var delayMutex sync.Mutex
+
+/* Extract the remote IP address of the given remote
+ * The remote is expected to come from http.Request and contain the IP address plus the port */
+func extractRemoteIP(remote string) string {
+	// Check if IPv6
+	i := strings.Index(remote, "[")
+	if i >= 0 {
+		j := strings.Index(remote, "]")
+		if j <= i {
+			return remote
+		}
+		return remote[i+1 : j]
+	}
+	i = strings.Index(remote, ":")
+	if i > 0 {
+		return remote[:i]
+	}
+	return remote
+}
+
+/* Delay a request for the given remote if required by spam protection */
+func delayIfRequired(remote string) {
+	if cf.RequestDelay == 0 {
+		return
+	}
+	address := extractRemoteIP(remote)
+	now := time.Now().UnixNano() / 1000000 // Timestamp now in milliseconds. This should be fine until 2262
+	delayMutex.Lock()
+	delay, ok := delays[address]
+	delayMutex.Unlock()
+	if ok {
+		delta := cf.RequestDelay - (now - delay)
+		if delta > 0 {
+			time.Sleep(time.Duration(delta) * time.Millisecond)
+		}
+	}
+	delays[address] = time.Now().UnixNano() / 1000000 // Fresh timestamp
+}
+
 func handlerHead(w http.ResponseWriter, r *http.Request) {
 	var pasta Pasta
 	id := ExtractPastaId(r.URL.Path)
@@ -336,6 +379,7 @@ NotFound:
 }
 
 func handlerPost(w http.ResponseWriter, r *http.Request) {
+	delayIfRequired(r.RemoteAddr)
 	pasta, err := ReceivePasta(r)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -414,6 +458,7 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	} else if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		handlerPost(w, r)
 	} else if r.Method == http.MethodDelete {
+		delayIfRequired(r.RemoteAddr)
 		id := ExtractPastaId(r.URL.Path)
 		token := takeFirst(r.URL.Query()["token"])
 		deletePasta(id, token, w)
@@ -441,6 +486,7 @@ func handlerRobots(w http.ResponseWriter, r *http.Request) {
 
 // Delete pasta
 func handlerDelete(w http.ResponseWriter, r *http.Request) {
+	delayIfRequired(r.RemoteAddr)
 	id := takeFirst(r.URL.Query()["id"])
 	token := takeFirst(r.URL.Query()["token"])
 	deletePasta(id, token, w)
@@ -472,6 +518,11 @@ func cleanupThread() {
 		if err := bowl.RemoveExpired(); err != nil {
 			log.Fatalf("Error while removing expired pastas: %s", err)
 		}
+		if cf.RequestDelay > 0 { // Cleanup of the spam protection addresses only if enabled
+			delayMutex.Lock()
+			delays = make(map[string]int64)
+			delayMutex.Unlock()
+		}
 		duration = time.Now().Unix() - duration + int64(cf.CleanupInterval)
 		if duration > 0 {
 			time.Sleep(time.Duration(cf.CleanupInterval) * time.Second)
@@ -492,6 +543,8 @@ func main() {
 	cf.MimeTypesFile = "mime.types"
 	cf.DefaultExpire = 0
 	cf.CleanupInterval = 60 * 60 // Default cleanup is once per hour
+	cf.RequestDelay = 0          // By default not spam protection (Assume we are in safe environment)
+	delays = make(map[string]int64)
 	// Parse program arguments for config
 	parseCf := ParserConfig{}
 	parser := argparse.NewParser("pastad", "pasta server")
@@ -508,7 +561,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s\n", parser.Usage(err))
 		os.Exit(1)
 	}
-	fmt.Println("Starting pasta server ... ")
+	log.Println("Starting pasta server ... ")
 	configFile := *parseCf.ConfigFile
 	if configFile != "" && FileExists(configFile) {
 		if _, err := toml.DecodeFile(configFile, &cf); err != nil {
