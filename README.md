@@ -35,6 +35,13 @@ $ sudo mkfs.ext4 /dev/sdb1
 $ sudo ros install -d /dev/sda -c cloud-init.yaml
 ```
 
+## Run on openSUSE
+
+We build openSUSE package at [build.opensuse.org](https://build.opensuse.org/package/show/home:pdostal/pasta). You can install it like this:
+
+    zypper addrepo https://download.opensuse.org/repositories/home:/pdostal/openSUSE_Tumbleweed/home:pdostal.repo
+    zypper refresh; zypper install pasta
+
 ## Build and run from source
 
     make pastad                                    # Server
