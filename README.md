@@ -47,6 +47,7 @@ We build openSUSE package at [build.opensuse.org](https://build.opensuse.org/pac
     make pastad                                    # Server
     make pasta                                     # Client
     make                                           # all
+	make static                                    # static binaries
 
 Then create a `pastad.toml` file using the provided example (`pastad.toml.example`) and run the server with
 

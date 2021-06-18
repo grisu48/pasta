@@ -1,5 +1,6 @@
 default: all
 all: pasta pastad
+static: pasta-static pastad-static
 
 .PHONY: all test clean
 
@@ -11,6 +12,8 @@ pasta: cmd/pasta/pasta.go cmd/pasta/storage.go
 	go build $^
 pastad: cmd/pastad/pastad.go cmd/pastad/storage.go
 	go build $^
+pasta-static: cmd/pasta/pasta.go cmd/pasta/storage.go
+	CGO_ENABLED=0 go build -ldflags="-w -s" -o pasta $^
 pastad-static: cmd/pastad/pastad.go cmd/pastad/storage.go
 	CGO_ENABLED=0 go build -ldflags="-w -s" -o pastad $^
 
