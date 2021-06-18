@@ -37,10 +37,11 @@ $ sudo ros install -d /dev/sda -c cloud-init.yaml
 
 ## Run on openSUSE
 
-We build openSUSE package at [build.opensuse.org](https://build.opensuse.org/package/show/home:pdostal/pasta). You can install it like this:
+We build openSUSE package at [build.opensuse.org](https://build.opensuse.org/package/show/home%3Aph03nix%3Atools/pasta). To install follow the instructions from [software.opensuse.org](https://software.opensuse.org/download/package?package=pasta&project=home%3Aph03nix%3Atools) or the following snippet:
 
-    zypper addrepo https://download.opensuse.org/repositories/home:/pdostal/openSUSE_Tumbleweed/home:pdostal.repo
-    zypper refresh; zypper install pasta
+	# Tumbleweed
+    zypper addrepo zypper addrepo https://download.opensuse.org/repositories/home:ph03nix:tools/openSUSE_Tumbleweed/home:ph03nix:tools.repo
+    zypper refresh && zypper install pasta
 
 ## Build and run from source
 
