@@ -38,4 +38,22 @@ echo "Testing spam protection ... "
 sleep 2
 ../pasta -r http://127.0.0.1:8200 testfile >/dev/null
 
+## TODO: Test expire pasta cleanup
+
+## Test special commands
+function test_special_command() {
+	command="$1"
+	echo "test" > $command
+	# Ambiguous, if the shortcut command and a similar file exists. This must fail
+	! ../pasta -r http://127.0.0.1:8200 "$command"
+	# However it must pass, if the file is explicitly stated
+	../pasta -r http://127.0.0.1:8200 -f "$command"
+	# And it must succeed, if there is no such file and thus is it clear what should happen
+	if [[ "$command" != "rm" ]]; then rm "$command"; fi
+	../pasta -r http://127.0.0.1:8200 "$command"
+}
+test_special_command "ls"
+test_special_command "rm"
+test_special_command "gc"
+
 echo "All good :-)"

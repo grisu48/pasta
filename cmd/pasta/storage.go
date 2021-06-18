@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Pasta struct {
@@ -20,6 +21,7 @@ type Storage struct {
 	Pastas   []Pasta
 	file     *os.File
 	filename string
+	expired  int // number of expired pastas when loading
 }
 
 /* Format for writing to storage*/
@@ -40,6 +42,9 @@ func (stor *Storage) Open(filename string) error {
 		return err
 	}
 	stor.Pastas = make([]Pasta, 0)
+	dirty := false // dirty flag used to rewrite the file if some pastas are expired
+	stor.expired = 0
+	now := time.Now().Unix()
 	// Read file
 	scanner := bufio.NewScanner(stor.file)
 	for scanner.Scan() {
@@ -55,7 +60,18 @@ func (stor *Storage) Open(filename string) error {
 		pasta := Pasta{Token: split[0], Filename: split[3], Url: strings.Join(split[4:], ":")}
 		pasta.Date, _ = strconv.ParseInt(split[1], 10, 64)
 		pasta.Expire, _ = strconv.ParseInt(split[2], 10, 64)
-		stor.Pastas = append(stor.Pastas, pasta)
+		// Don't add expired pastas and mark storage as dirty for re-write in the end
+		if pasta.Expire != 0 && now > pasta.Expire {
+			dirty = true
+			stor.expired++
+		} else {
+			stor.Pastas = append(stor.Pastas, pasta)
+		}
+	}
+
+	// Rewrite storage if expired pastas have been removed
+	if dirty {
+		return stor.Write()
 	}
 	return nil
 }
@@ -92,6 +108,10 @@ func (stor *Storage) Write() error {
 		}
 	}
 	return stor.file.Sync()
+}
+
+func (stor *Storage) ExpiredPastas() int {
+	return stor.expired
 }
 
 func getPastaId(url string) string {
