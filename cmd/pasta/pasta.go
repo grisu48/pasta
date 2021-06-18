@@ -50,6 +50,7 @@ func usage() {
 	fmt.Println("     -f, --file FILE            Send FILE to server")
 	fmt.Println("")
 	fmt.Println("     --ls, --list               List known pasta pushes")
+	fmt.Println("     --gc                       Garbage collector (clean expired pastas)")
 	fmt.Println("")
 	fmt.Println("One or more files can be fined which will be pushed to the given server")
 	fmt.Println("If no file is given, the input from stdin will be pushed")
@@ -129,6 +130,7 @@ func main() {
 	}
 	// Files to be pushed
 	files := make([]string, 0)
+	explicit := false // marking files as explicitly given. This disabled the shortcut commands (ls, rm, gc)
 	// Parse program arguments
 	args := os.Args[1:]
 	for i := 0; i < len(args); i++ {
@@ -150,11 +152,14 @@ func main() {
 				}
 			} else if arg == "-f" || arg == "--file" {
 				i++
+				explicit = true
 				files = append(files, args[i])
 			} else if arg == "--ls" || arg == "--list" {
 				action = "list"
 			} else if arg == "--rm" || arg == "--remote" || arg == "--delete" {
 				action = "rm"
+			} else if arg == "--gc" {
+				action = "gc"
 			} else {
 				fmt.Fprintf(os.Stderr, "Invalid argument: %s\n", arg)
 				os.Exit(1)
@@ -173,15 +178,34 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Cannot open pasta storage: %s\n", err)
 	}
 
-	// Special action: "pasta ls" list pasta
-	if action == "" && len(files) == 1 && files[0] == "ls" {
-		action = "list"
-		files = make([]string, 0)
-	}
-	// Special action: "pasta rm" is the same as "pasta --rm"
-	if len(files) > 1 && files[0] == "rm" {
-		action = "rm"
-		files = files[1:]
+	if !explicit {
+		// Special action: "pasta ls" list pasta
+		if action == "" && len(files) == 1 && files[0] == "ls" {
+			if FileExists(files[0]) {
+				fmt.Fprintf(os.Stderr, "Ambiguous command %s (file '%s' exists) - please use '-f %s' to upload or --ls to list pastas\n", files[0], files[0], files[0])
+				os.Exit(1)
+			}
+			action = "list"
+			files = make([]string, 0)
+		}
+		// Special action: "pasta rm" is the same as "pasta --rm"
+		if len(files) > 1 && files[0] == "rm" {
+			if FileExists(files[0]) {
+				fmt.Fprintf(os.Stderr, "Ambiguous command %s (file '%s' exists) - please use '-f %s' to upload or --rm to remove pastas\n", files[0], files[0], files[0])
+				os.Exit(1)
+			}
+			action = "rm"
+			files = files[1:]
+		}
+		// Special action: "pasta gc" is the same as "pasta --gc"
+		if len(files) == 1 && (files[0] == "gc" || files[0] == "clean" || files[0] == "expire") {
+			if FileExists(files[0]) {
+				fmt.Fprintf(os.Stderr, "Ambiguous command %s (file '%s' exists) - please use '-f %s' to upload or --gc to cleanup expired pastas\n", files[0], files[0], files[0])
+				os.Exit(1)
+			}
+			action = "gc"
+			files = files[1:]
+		}
 	}
 
 	if action == "push" || action == "" {
@@ -193,6 +217,13 @@ func main() {
 					os.Exit(1)
 				}
 				defer file.Close()
+				if stat, err := file.Stat(); err != nil {
+					fmt.Fprintf(os.Stderr, "%s: %s\n", filename, err)
+					os.Exit(1)
+				} else if stat.Size() == 0 {
+					fmt.Fprintf(os.Stderr, "Skipping empty file %s\n", filename)
+					continue
+				}
 				// Push file
 				pasta, err := push(file)
 				pasta.Filename = getFilename(filename)
@@ -271,6 +302,16 @@ func main() {
 		// And re-write storage
 		if err = stor.Write(); err != nil {
 			fmt.Fprintf(os.Stderr, "Error writing to local storage: %s\n", err)
+		}
+	} else if action == "gc" || action == "clean" {
+		// Cleanup happens when loading pastas
+		expired := stor.ExpiredPastas()
+		if expired == 0 {
+			fmt.Println("all good")
+		} else if expired == 1 {
+			fmt.Println("one expired pasta cleared")
+		} else {
+			fmt.Printf("%d expired pastas cleared\n", expired)
 		}
 	} else {
 		fmt.Fprintf(os.Stderr, "Unkown action: %s\n", action)

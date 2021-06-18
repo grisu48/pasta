@@ -266,6 +266,7 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	}
 	if expire := parseExpire(r.Header["Expire"]); expire > 0 {
 		pasta.ExpireDate = expire
+		// TODO: Add maximum expire
 	}
 
 	pasta.Id = bowl.GenerateRandomBinId(cf.PastaCharacters)
@@ -416,7 +417,7 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "</body></html>")
 			} else if retFormat == "json" {
 				// Dont use json package, the reply is simple enough to build it on-the-fly
-				reply := fmt.Sprintf("{\"url\":\"%s\",\"token\":\"%s\"}", url, pasta.Token)
+				reply := fmt.Sprintf("{\"url\":\"%s\",\"token\":\"%s\", \"expire\":%d}", url, pasta.Token, pasta.ExpireDate)
 				w.Write([]byte(reply))
 			} else {
 				fmt.Fprintf(w, "url:   %s\ntoken: %s\n", url, pasta.Token)
