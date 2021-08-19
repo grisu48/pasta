@@ -76,12 +76,22 @@ func (pc *ParserConfig) ApplyTo(cf *Config) {
 	}
 }
 
+func removeNonAlphaNumeric(input string) string {
+	ret := ""
+	for _, c := range input {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+			ret += string(c)
+		}
+	}
+	return ret
+}
+
 func ExtractPastaId(path string) string {
 	i := strings.LastIndex(path, "/")
 	if i < 0 {
-		return path
+		return removeNonAlphaNumeric(path)
 	} else {
-		return path[i+1:]
+		return removeNonAlphaNumeric(path[i+1:])
 	}
 }
 
@@ -260,16 +270,16 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	var reader io.ReadCloser
 	pasta := Pasta{Id: ""}
 
-	// Pase expire if given
+	// Parse expire if given
 	if cf.DefaultExpire > 0 {
 		pasta.ExpireDate = time.Now().Unix() + cf.DefaultExpire
 	}
 	if expire := parseExpire(r.Header["Expire"]); expire > 0 {
 		pasta.ExpireDate = expire
-		// TODO: Add maximum expire
+		// TODO: Add maximum expiration parameter
 	}
 
-	pasta.Id = bowl.GenerateRandomBinId(cf.PastaCharacters)
+	pasta.Id = removeNonAlphaNumeric(bowl.GenerateRandomBinId(cf.PastaCharacters))
 	// InsertPasta sets filename
 	if err = bowl.InsertPasta(&pasta); err != nil {
 		return pasta, err
