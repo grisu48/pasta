@@ -3,9 +3,18 @@
 # Summary: Function test for pasta
 #
 
+PASTAS=~/.pastas.dat               # pasta client dat file
+PASTAS_TEMP=""                     # temp file, if present
+
 function cleanup() {
+	set +e
+	# restore old pasta client file
+	if [[ $PASTAS_TEMP != "" ]]; then
+		mv "$PASTAS_TEMP" "$PASTAS"
+	fi
 	rm -f testfile
 	rm -f testfile2
+	rm -f rm
 	kill %1
 	rm -rf pasta_test
 	rm -f pasta.json
@@ -14,6 +23,12 @@ function cleanup() {
 set -e
 #set -x
 trap cleanup EXIT
+
+## Preparation: Safe old pastas.dat, if existing
+if [[ -s $PASTAS ]]; then
+	PASTAS_TEMP=`mktemp`
+	mv "$PASTAS" "$PASTAS_TEMP"
+fi
 
 ## Setup pasta server
 ../pastad -c pastad.toml -m ../mime.types -B http://127.0.0.1:8200 -b 127.0.0.1:8200 &

@@ -76,23 +76,41 @@ func (pc *ParserConfig) ApplyTo(cf *Config) {
 	}
 }
 
+func isAlphaNumeric(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+func containsOnlyAlphaNumeric(input string) bool {
+	for _, c := range input {
+		if !isAlphaNumeric(c) {
+			return false
+		}
+	}
+	return true
+}
+
 func removeNonAlphaNumeric(input string) string {
 	ret := ""
 	for _, c := range input {
-		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+		if isAlphaNumeric(c) {
 			ret += string(c)
 		}
 	}
 	return ret
 }
 
-func ExtractPastaId(path string) string {
+func ExtractPastaId(path string) (string, error) {
+	var id string
 	i := strings.LastIndex(path, "/")
 	if i < 0 {
-		return removeNonAlphaNumeric(path)
+		id = path
 	} else {
-		return removeNonAlphaNumeric(path[i+1:])
+		id = path[i+1:]
 	}
+	if !containsOnlyAlphaNumeric(id) {
+		return "", fmt.Errorf("invalid id")
+	}
+	return id, nil
 }
 
 /* Load MIME types file. MIME types file is a simple text file that describes mime types based on file extenstions.
@@ -360,7 +378,10 @@ func delayIfRequired(remote string) {
 
 func handlerHead(w http.ResponseWriter, r *http.Request) {
 	var pasta Pasta
-	id := ExtractPastaId(r.URL.Path)
+	id, err := ExtractPastaId(r.URL.Path)
+	if err != nil {
+		goto BadRequest
+	}
 	if pasta, err := bowl.GetPasta(id); err != nil {
 		log.Fatalf("Error getting pasta %s: %s", pasta.Id, err)
 		goto ServerError
@@ -386,6 +407,14 @@ ServerError:
 NotFound:
 	w.WriteHeader(404)
 	fmt.Fprintf(w, "pasta not found")
+	return
+BadRequest:
+	w.WriteHeader(400)
+	if err == nil {
+		fmt.Fprintf(w, "bad request")
+	} else {
+		fmt.Fprintf(w, "%s", err)
+	}
 	return
 }
 
@@ -437,9 +466,13 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
+	var err error
 	if r.Method == http.MethodGet {
 		// Check if bin ID is given
-		id := ExtractPastaId(r.URL.Path)
+		id, err := ExtractPastaId(r.URL.Path)
+		if err != nil {
+			goto BadRequest
+		}
 		if id == "" {
 			handlerIndex(w, r)
 		} else {
@@ -470,7 +503,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		handlerPost(w, r)
 	} else if r.Method == http.MethodDelete {
 		delayIfRequired(r.RemoteAddr)
-		id := ExtractPastaId(r.URL.Path)
+		id, err := ExtractPastaId(r.URL.Path)
+		if err != nil {
+			goto BadRequest
+		}
 		token := takeFirst(r.URL.Query()["token"])
 		deletePasta(id, token, w)
 	} else if r.Method == http.MethodHead {
@@ -483,6 +519,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 NoSuchPasta:
 	w.WriteHeader(404)
 	fmt.Fprintf(w, "No pasta\n\nSorry, there is no pasta for this link")
+	return
+BadRequest:
+	w.WriteHeader(400)
+	if err == nil {
+		fmt.Fprintf(w, "bad request")
+	} else {
+		fmt.Fprintf(w, "%s", err)
+	}
 	return
 }
 
