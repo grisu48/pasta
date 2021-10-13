@@ -3,21 +3,37 @@
 # Summary: Function test for pasta
 #
 
+PASTAS=~/.pastas.dat               # pasta client dat file
+PASTAS_TEMP=""                     # temp file, if present
+
 function cleanup() {
+	set +e
+	# restore old pasta client file
+	if [[ $PASTAS_TEMP != "" ]]; then
+		mv "$PASTAS_TEMP" "$PASTAS"
+	fi
 	rm -f testfile
 	rm -f testfile2
+	rm -f rm
 	kill %1
 	rm -rf pasta_test
 	rm -f pasta.json
+	rm -f test_config.toml
 }
 
 set -e
 #set -x
 trap cleanup EXIT
 
+## Preparation: Safe old pastas.dat, if existing
+if [[ -s $PASTAS ]]; then
+	PASTAS_TEMP=`mktemp`
+	mv "$PASTAS" "$PASTAS_TEMP"
+fi
+
 ## Setup pasta server
 ../pastad -c pastad.toml -m ../mime.types -B http://127.0.0.1:8200 -b 127.0.0.1:8200 &
-sleep 1        # Don't do sleep here you lazy ... :-)
+sleep 2        # TODO: Don't do sleep here you lazy ... :-)
 
 ## Push a testfile
 echo "Testfile 123" > testfile
@@ -55,5 +71,23 @@ function test_special_command() {
 test_special_command "ls"
 test_special_command "rm"
 test_special_command "gc"
+
+## Test creation of default config
+rm -f test_config.toml
+../pastad -c test_config.toml -B http://127.0.0.1:8201 -b 127.0.0.1:8201 &
+sleep 2 # TODO: Don't sleep here either but create a valid monitor
+kill %2
+stat test_config.toml
+# Ensure the test config contains the expected entries
+grep 'BaseURL[[:space:]]=' test_config.toml
+grep 'BindAddress[[:space:]]*=' test_config.toml
+grep 'PastaDir[[:space:]]*=' test_config.toml
+grep 'MaxPastaSize[[:space:]]*=' test_config.toml
+grep 'PastaCharacters[[:space:]]*=' test_config.toml
+grep 'Expire[[:space:]]*=' test_config.toml
+grep 'Cleanup[[:space:]]*=' test_config.toml
+grep 'RequestDelay[[:space:]]*=' test_config.toml
+echo "test_config.toml has been successfully created"
+
 
 echo "All good :-)"

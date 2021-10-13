@@ -1,7 +1,7 @@
-BaseURL = "http://localhost:8199"    # replace with your hostname
-PastaDir = "pastas"                  # absolute or relative path to the pastas
-BindAddress = ":8199"                # server bind address
-MaxPastaSize = 26214400              # max allowed pasta size - 5 MB
+BaseURL = "http://localhost:8199"    # base URL as used within pasta
+BindAddress = ":8199"                # bind address
+PastaDir = "pastas"                  # absolute or relative path to the pastas data directory
+MaxPastaSize = 5242880               # max allowed pasta size (5 MiB)
 PastaCharacters = 8                  # Number of characters for pasta id
 Expire = 2592000                     # Default expire in seconds (1 Month)
 Cleanup = 3600                       # Cleanup interval in seconds (1 hour)

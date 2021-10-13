@@ -27,7 +27,7 @@ type Config struct {
 	BindAddr        string `toml:"BindAddress"`
 	MaxPastaSize    int64  `toml:"MaxPastaSize"` // Max bin size in bytes
 	PastaCharacters int    `toml:"PastaCharacters"`
-	MimeTypesFile   string `toml:"MimeTypes`     // Load mime types from this file
+	MimeTypesFile   string `toml:"MimeTypes"`    // Load mime types from this file
 	DefaultExpire   int64  `toml:"Expire"`       // Default expire time for a new pasta in seconds
 	CleanupInterval int    `toml:"Cleanup"`      // Seconds between cleanup cycles
 	RequestDelay    int64  `toml:"RequestDelay"` // Required delay between requests in milliseconds
@@ -48,6 +48,26 @@ type ParserConfig struct {
 var cf Config
 var bowl PastaBowl
 var mimeExtensions map[string]string
+
+func CreateDefaultConfigfile(filename string) error {
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "localhost"
+	}
+	content := []byte(fmt.Sprintf("BaseURL = 'http://%s:8199'\nBindAddress = ':8199'\nPastaDir = 'pastas'\nMaxPastaSize = 5242880       # 5 MiB\nPastaCharacters = 8\nExpire = 2592000             # 1 month\nCleanup = 3600               # cleanup interval in seconds\nRequestDelay = 2000", hostname))
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err = file.Write(content); err != nil {
+		return err
+	}
+	if err := file.Chmod(0640); err != nil {
+		return err
+	}
+	return file.Close()
+}
 
 func (pc *ParserConfig) ApplyTo(cf *Config) {
 	if pc.BaseURL != nil && *pc.BaseURL != "" {
@@ -76,13 +96,41 @@ func (pc *ParserConfig) ApplyTo(cf *Config) {
 	}
 }
 
-func ExtractPastaId(path string) string {
+func isAlphaNumeric(c rune) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+func containsOnlyAlphaNumeric(input string) bool {
+	for _, c := range input {
+		if !isAlphaNumeric(c) {
+			return false
+		}
+	}
+	return true
+}
+
+func removeNonAlphaNumeric(input string) string {
+	ret := ""
+	for _, c := range input {
+		if isAlphaNumeric(c) {
+			ret += string(c)
+		}
+	}
+	return ret
+}
+
+func ExtractPastaId(path string) (string, error) {
+	var id string
 	i := strings.LastIndex(path, "/")
 	if i < 0 {
-		return path
+		id = path
 	} else {
-		return path[i+1:]
+		id = path[i+1:]
 	}
+	if !containsOnlyAlphaNumeric(id) {
+		return "", fmt.Errorf("invalid id")
+	}
+	return id, nil
 }
 
 /* Load MIME types file. MIME types file is a simple text file that describes mime types based on file extenstions.
@@ -260,16 +308,16 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	var reader io.ReadCloser
 	pasta := Pasta{Id: ""}
 
-	// Pase expire if given
+	// Parse expire if given
 	if cf.DefaultExpire > 0 {
 		pasta.ExpireDate = time.Now().Unix() + cf.DefaultExpire
 	}
 	if expire := parseExpire(r.Header["Expire"]); expire > 0 {
 		pasta.ExpireDate = expire
-		// TODO: Add maximum expire
+		// TODO: Add maximum expiration parameter
 	}
 
-	pasta.Id = bowl.GenerateRandomBinId(cf.PastaCharacters)
+	pasta.Id = removeNonAlphaNumeric(bowl.GenerateRandomBinId(cf.PastaCharacters))
 	// InsertPasta sets filename
 	if err = bowl.InsertPasta(&pasta); err != nil {
 		return pasta, err
@@ -350,7 +398,10 @@ func delayIfRequired(remote string) {
 
 func handlerHead(w http.ResponseWriter, r *http.Request) {
 	var pasta Pasta
-	id := ExtractPastaId(r.URL.Path)
+	id, err := ExtractPastaId(r.URL.Path)
+	if err != nil {
+		goto BadRequest
+	}
 	if pasta, err := bowl.GetPasta(id); err != nil {
 		log.Fatalf("Error getting pasta %s: %s", pasta.Id, err)
 		goto ServerError
@@ -376,6 +427,14 @@ ServerError:
 NotFound:
 	w.WriteHeader(404)
 	fmt.Fprintf(w, "pasta not found")
+	return
+BadRequest:
+	w.WriteHeader(400)
+	if err == nil {
+		fmt.Fprintf(w, "bad request")
+	} else {
+		fmt.Fprintf(w, "%s", err)
+	}
 	return
 }
 
@@ -427,9 +486,13 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 }
 
 func handler(w http.ResponseWriter, r *http.Request) {
+	var err error
 	if r.Method == http.MethodGet {
 		// Check if bin ID is given
-		id := ExtractPastaId(r.URL.Path)
+		id, err := ExtractPastaId(r.URL.Path)
+		if err != nil {
+			goto BadRequest
+		}
 		if id == "" {
 			handlerIndex(w, r)
 		} else {
@@ -460,7 +523,10 @@ func handler(w http.ResponseWriter, r *http.Request) {
 		handlerPost(w, r)
 	} else if r.Method == http.MethodDelete {
 		delayIfRequired(r.RemoteAddr)
-		id := ExtractPastaId(r.URL.Path)
+		id, err := ExtractPastaId(r.URL.Path)
+		if err != nil {
+			goto BadRequest
+		}
 		token := takeFirst(r.URL.Query()["token"])
 		deletePasta(id, token, w)
 	} else if r.Method == http.MethodHead {
@@ -473,6 +539,14 @@ func handler(w http.ResponseWriter, r *http.Request) {
 NoSuchPasta:
 	w.WriteHeader(404)
 	fmt.Fprintf(w, "No pasta\n\nSorry, there is no pasta for this link")
+	return
+BadRequest:
+	w.WriteHeader(400)
+	if err == nil {
+		fmt.Fprintf(w, "bad request")
+	} else {
+		fmt.Fprintf(w, "%s", err)
+	}
 	return
 }
 
@@ -549,7 +623,7 @@ func main() {
 	// Parse program arguments for config
 	parseCf := ParserConfig{}
 	parser := argparse.NewParser("pastad", "pasta server")
-	parseCf.ConfigFile = parser.String("c", "config", &argparse.Options{Default: "pastad.toml", Help: "Set config file"})
+	parseCf.ConfigFile = parser.String("c", "config", &argparse.Options{Default: "", Help: "Set config file"})
 	parseCf.BaseURL = parser.String("B", "baseurl", &argparse.Options{Help: "Set base URL for instance"})
 	parseCf.PastaDir = parser.String("d", "dir", &argparse.Options{Help: "Set pasta data directory"})
 	parseCf.BindAddr = parser.String("b", "bind", &argparse.Options{Help: "Address to bind server to"})
@@ -564,13 +638,19 @@ func main() {
 	}
 	log.Println("Starting pasta server ... ")
 	configFile := *parseCf.ConfigFile
-	if configFile != "" && FileExists(configFile) {
-		if _, err := toml.DecodeFile(configFile, &cf); err != nil {
-			fmt.Printf("Error loading configuration file: %s\n", err)
-			os.Exit(1)
+	if configFile != "" {
+		if FileExists(configFile) {
+			if _, err := toml.DecodeFile(configFile, &cf); err != nil {
+				fmt.Printf("Error loading configuration file: %s\n", err)
+				os.Exit(1)
+			}
+		} else {
+			if err := CreateDefaultConfigfile(configFile); err == nil {
+				fmt.Fprintf(os.Stderr, "Created default config file '%s'\n", configFile)
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: Cannot create default config file '%s': %s\n", configFile, err)
+			}
 		}
-	} else {
-		fmt.Fprintf(os.Stderr, "Warning: Config file '%s' not found\n", configFile)
 	}
 	// Program arguments overwrite config file
 	parseCf.ApplyTo(&cf)
