@@ -55,7 +55,18 @@ func CreateDefaultConfigfile(filename string) error {
 		hostname = "localhost"
 	}
 	content := []byte(fmt.Sprintf("BaseURL = 'http://%s:8199'\nBindAddress = ':8199'\nPastaDir = 'pastas'\nMaxPastaSize = 5242880       # 5 MiB\nPastaCharacters = 8\nExpire = 2592000             # 1 month\nCleanup = 3600               # cleanup interval in seconds\nRequestDelay = 2000", hostname))
-	return os.WriteFile(filename, content, 0644)
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err = file.Write(content); err != nil {
+		return err
+	}
+	if err := file.Chmod(0640); err != nil {
+		return err
+	}
+	return file.Close()
 }
 
 func (pc *ParserConfig) ApplyTo(cf *Config) {
