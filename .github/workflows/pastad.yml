@@ -1,6 +1,9 @@
+---
+
 name: pastad
 
-on: push
+'on':
+  push
 
 jobs:
   pastad:
