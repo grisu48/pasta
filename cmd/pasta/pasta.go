@@ -18,10 +18,32 @@ import (
 )
 
 type Config struct {
-	RemoteHost string `toml:"RemoteHost"`
+	RemoteHost  string       `toml:"RemoteHost"`
+	RemoteHosts []RemoteHost `toml:"Remote"`
+}
+type RemoteHost struct {
+	URL     string   `toml:"url"`     // URL of the remote host
+	Alias   string   `toml:"alias"`   // Alias for the remote host
+	Aliases []string `toml:"aliases"` // List of additional aliases for the remote host
 }
 
 var cf Config
+
+// Search for the given remote alias. Returns true and the remote if found, otherwise false and an empty instance
+func (cf *Config) FindRemoteAlias(remote string) (bool, RemoteHost) {
+	for _, remote := range cf.RemoteHosts {
+		if cf.RemoteHost == remote.Alias {
+			return true, remote
+		}
+		for _, alias := range remote.Aliases {
+			if cf.RemoteHost == alias {
+				return true, remote
+			}
+		}
+	}
+	var ret RemoteHost
+	return false, ret
+}
 
 /* http error instance */
 type HttpError struct {
@@ -45,7 +67,7 @@ func usage() {
 	fmt.Printf("Usage: %s [OPTIONS] [FILE,[FILE2,...]]\n\n", os.Args[0])
 	fmt.Println("OPTIONS")
 	fmt.Println("     -h, --help                 Print this help message")
-	fmt.Println("     -r, --remote HOST          Define remote host (Default: http://localhost:8199)")
+	fmt.Println("     -r, --remote HOST          Define remote host or alias (Default: http://localhost:8199)")
 	fmt.Println("     -c, --config FILE          Define config file (Default: ~/.pasta.toml)")
 	fmt.Println("     -f, --file FILE            Send FILE to server")
 	fmt.Println("")
@@ -168,9 +190,14 @@ func main() {
 			files = append(files, arg)
 		}
 	}
+	if found, remote := cf.FindRemoteAlias(cf.RemoteHost); found {
+		fmt.Fprintf(os.Stderr, "Alias found: %s for %s\n", cf.RemoteHost, remote.URL)
+		cf.RemoteHost = remote.URL
+	}
 	// Sanity checks
 	if strings.Index(cf.RemoteHost, "://") < 0 {
-		cf.RemoteHost = "http://" + cf.RemoteHost
+		fmt.Fprintf(os.Stderr, "Invalid remote: %s\n", cf.RemoteHost)
+		os.Exit(1)
 	}
 	// Load stored pastas
 	stor, err := OpenStorage(homeDir + "/.pastas.dat")

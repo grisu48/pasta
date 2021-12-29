@@ -2,3 +2,16 @@
 # Place this file in ~/.pasta.toml
 
 RemoteHost = "http://localhost:8199"
+
+# Example for a remote with one alias
+# aliases can be given to `pasta` as a remote argument and will be
+#   completed to the given url
+[[Remote]]
+url = "http://localhost:8199"
+alias = "localhost"
+
+# Example of a remote with multiple aliases
+[[Remote]]
+url = ""http://localhost:8200"
+alias = "localhost2"          # one alias
+aliases = ["local2", "loc2"]  # more aliases
