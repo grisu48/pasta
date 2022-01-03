@@ -54,6 +54,22 @@ Then create a `pastad.toml` file using the provided example (`pastad.toml.exampl
 
     ./pastad
 
+### environment variables
+
+In addition to the config file, `pastad` can also be configured via environmental variables. This might be useful for running pasta as a container without a dedicated config file. Supported environmental variables are:
+
+| Key | Description |
+|-----|-------------|
+| `PASTA_BASEURL` | Base URL for the pasta instance |
+| `PASTA_PASTADIR` | Data directory for pastas |
+| `PASTA_BINDADDR` | Address to bind the server to |
+| `PASTA_MAXSIZE` | Maximum size (in Bytes) for new pastas |
+| `PASTA_CHARACTERS` | Number of characters for new pastas |
+| `PASTA_MIMEFILE` | MIME file |
+| `PASTA_EXPIRE` | Default expiration time (in seconds) |
+| `PASTA_CLEANUP` | Seconds between cleanup cycles |
+| `PASTA_REQUESTDELAY` | Delay between requests from the same host in milliseconds |
+
 ### Build docker image
 
     make docker

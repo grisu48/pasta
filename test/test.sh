@@ -1,7 +1,5 @@
 #!/bin/bash
-#
-# Summary: Function test for pasta
-#
+# Summary: Function test for pasta & pastad
 
 PASTAS=~/.pastas.dat               # pasta client dat file
 PASTAS_TEMP=""                     # temp file, if present
@@ -46,6 +44,16 @@ link=`../pasta -r http://127.0.0.1:8200 < testfile`
 curl -o testfile2 $link
 diff testfile testfile2
 echo "Testfile 2 matches"
+
+## Second pasta server with environment variables
+echo "Testing environment variables ... "
+PASTA_BASEURL=pastas PASTA_BINDADDR=127.0.0.1:8201 PASTA_CHARACTERS=12 ../pastad -m ../mime.types &
+SECONDPID=$!
+sleep 2        # TODO: Don't do sleep here you lazy ... :-)
+link2=`../pasta -r http://127.0.0.1:8201 < testfile`
+curl -o testfile_second $link
+diff testfile testfile_second
+kill $SECONDPID
 
 ## Test spam protection
 echo "Testing spam protection ... "

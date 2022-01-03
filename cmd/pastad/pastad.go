@@ -69,6 +69,67 @@ func CreateDefaultConfigfile(filename string) error {
 	return file.Close()
 }
 
+// SetDefaults sets the default values to a config instance
+func (cf *Config) SetDefaults() {
+	cf.BaseUrl = "http://localhost:8199"
+	cf.PastaDir = "pastas/"
+	cf.BindAddr = "127.0.0.1:8199"
+	cf.MaxPastaSize = 1024 * 1024 * 25 // Default max size: 25 MB
+	cf.PastaCharacters = 8             // Note: Never use less than 8 characters!
+	cf.MimeTypesFile = "mime.types"
+	cf.DefaultExpire = 0
+	cf.CleanupInterval = 60 * 60 // Default cleanup is once per hour
+	cf.RequestDelay = 0          // By default not spam protection (Assume we are in safe environment)
+}
+
+// getenv reads a given environmental variable and returns it's value if present or defval if not present or empty
+func getenv(key string, defval string) string {
+	val := os.Getenv(key)
+	if val == "" {
+		return defval
+	}
+	return val
+}
+
+// getenv reads a given environmental variable as integer and returns it's value if present or defval if not present or empty
+func getenv_i(key string, defval int) int {
+	val := os.Getenv(key)
+	if val == "" {
+		return defval
+	}
+	if i32, err := strconv.Atoi(val); err != nil {
+		return defval
+	} else {
+		return i32
+	}
+}
+
+// getenv reads a given environmental variable as integer and returns it's value if present or defval if not present or empty
+func getenv_i64(key string, defval int64) int64 {
+	val := os.Getenv(key)
+	if val == "" {
+		return defval
+	}
+	if i64, err := strconv.ParseInt(val, 10, 64); err != nil {
+		return defval
+	} else {
+		return i64
+	}
+}
+
+// ReadEnv reads the environmental variables and sets the config accordingly
+func (cf *Config) ReadEnv() {
+	cf.BaseUrl = getenv("PASTA_BASEURL", cf.BaseUrl)
+	cf.PastaDir = getenv("PASTA_PASTADIR", cf.PastaDir)
+	cf.BindAddr = getenv("PASTA_BINDADDR", cf.BindAddr)
+	cf.MaxPastaSize = getenv_i64("PASTA_MAXSIZE", cf.MaxPastaSize)
+	cf.PastaCharacters = getenv_i("PASTA_CHARACTERS", cf.PastaCharacters)
+	cf.MimeTypesFile = getenv("PASTA_MIMEFILE", cf.MimeTypesFile)
+	cf.DefaultExpire = getenv_i64("PASTA_EXPIRE", cf.DefaultExpire)
+	cf.CleanupInterval = getenv_i("PASTA_CLEANUP", cf.CleanupInterval)
+	cf.RequestDelay = getenv_i64("PASTA_REQUESTDELAY", cf.RequestDelay)
+}
+
 func (pc *ParserConfig) ApplyTo(cf *Config) {
 	if pc.BaseURL != nil && *pc.BaseURL != "" {
 		cf.BaseUrl = *pc.BaseURL
@@ -609,16 +670,8 @@ func cleanupThread() {
 }
 
 func main() {
-	// Set defaults
-	cf.BaseUrl = "http://localhost:8199"
-	cf.PastaDir = "pastas/"
-	cf.BindAddr = "127.0.0.1:8199"
-	cf.MaxPastaSize = 1024 * 1024 * 25 // Default max size: 25 MB
-	cf.PastaCharacters = 8             // Note: Never use less than 8 characters!
-	cf.MimeTypesFile = "mime.types"
-	cf.DefaultExpire = 0
-	cf.CleanupInterval = 60 * 60 // Default cleanup is once per hour
-	cf.RequestDelay = 0          // By default not spam protection (Assume we are in safe environment)
+	cf.SetDefaults()
+	cf.ReadEnv()
 	delays = make(map[string]int64)
 	// Parse program arguments for config
 	parseCf := ParserConfig{}
