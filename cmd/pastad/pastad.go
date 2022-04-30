@@ -391,6 +391,8 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 		if err != nil {
 			return pasta, err
 		}
+	} else if content := r.FormValue("content"); content != "" {
+		reader = io.NopCloser(strings.NewReader(content))
 	} else {
 		// Otherwise the message body is the upload content
 		reader = r.Body
@@ -526,14 +528,15 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "<!doctype html><html><head><title>pasta</title></head>\n")
 				fmt.Fprintf(w, "<body>\n")
 				fmt.Fprintf(w, "<h1>pasta</h1>\n")
-				fmt.Fprintf(w, "<p><a href=\"%s\">%s</a>", url, url)
-				if pasta.ExpireDate > 0 {
-					fmt.Fprintf(w, " (expires %s)", time.Unix(pasta.ExpireDate, 0).Format("2006-01-02-15:04:05"))
-				}
-				fmt.Fprintf(w, "</p>\n")
 				deleteLink := fmt.Sprintf("%s/delete?id=%s&token=%s", cf.BaseUrl, pasta.Id, pasta.Token)
-				fmt.Fprintf(w, "<p>Accidentally uploaded? <a href=\"%s\">Delete it</a> right away</p>\n", deleteLink)
-				fmt.Fprintf(w, "<p>Modification token: <code>%s</code></p>\n", pasta.Token)
+				fmt.Fprintf(w, "<p>Here is your pasta: <a href=\"%s\">%s</a>.<br/>", url, url)
+				fmt.Fprintf(w, "<a href=\"%s\">Delete</a> it in case you don't want it anymore.</p>\n", deleteLink)
+				fmt.Fprintf(w, "<pre>")
+				if pasta.ExpireDate > 0 {
+					fmt.Fprintf(w, "Expiration:         %s\n", time.Unix(pasta.ExpireDate, 0).Format("2006-01-02-15:04:05"))
+				}
+				fmt.Fprintf(w, "Modification token: %s\n</pre>\n", pasta.Token)
+				fmt.Fprintf(w, "<p>That was fun! Let's <a href=\"%s\">upload another one</a>.</p>\n", cf.BaseUrl)
 				fmt.Fprintf(w, "</body></html>")
 			} else if retFormat == "json" {
 				// Dont use json package, the reply is simple enough to build it on-the-fly
@@ -628,18 +631,67 @@ func handlerDelete(w http.ResponseWriter, r *http.Request) {
 	deletePasta(id, token, w)
 }
 
+func timeHumanReadable(timestamp int64) string {
+	if timestamp < 60 {
+		return fmt.Sprintf("%d s", timestamp)
+	}
+
+	minutes := timestamp / 60
+	seconds := timestamp - (minutes * 60)
+	if minutes < 60 {
+		return fmt.Sprintf("%d:%d min", minutes, seconds)
+	}
+
+	hours := minutes / 60
+	minutes -= hours * 60
+	if hours < 24 {
+		return fmt.Sprintf("%d s", hours)
+	}
+
+	days := hours / 24
+	hours -= days * 24
+	if days > 365 {
+		years := float32(days) / 365.0
+		return fmt.Sprintf("%.2f years", years)
+	} else if days > 28 {
+		weeks := days / 7
+		if weeks > 4 {
+			months := days / 30
+			return fmt.Sprintf("%d months", months)
+		}
+		return fmt.Sprintf("%d weeks", weeks)
+	} else {
+		return fmt.Sprintf("%d days", days)
+	}
+}
+
 func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<!doctype html><html><head><title>pasta</title></head>\n")
 	fmt.Fprintf(w, "<body>\n")
 	fmt.Fprintf(w, "<h1>pasta</h1>\n")
-	fmt.Fprintf(w, "<p>Stupid simple pastebin service written in go. Visit the project repo on <a href=\"https://github.com/grisu48/pasta\" target=\"_BLANK\">Github</a>.</p>\n")
-	fmt.Fprintf(w, "<h3>Post a file</h3>\n")
-	fmt.Fprintf(w, "<p>Just shove your file via POST request to the main page :</p>")
-	fmt.Fprintf(w, "<pre>curl -X POST '%s' --data-binary @FILE</pre>\n", cf.BaseUrl)
-	fmt.Fprintf(w, "<p>Or use the following upload form</p>")
+	fmt.Fprintf(w, "<p>Stupid simple paste service written in <code>go</code>. Project page: <a href=\"https://github.com/grisu48/pasta\" target=\"_BLANK\">github.com/grisu48/pasta</a>.</p>\n")
+	fmt.Fprintf(w, "<p>Checkout our fresh CLI utilities in <a href=\"https://github.com/grisu48/pasta/releases/\" target=\"_BLANK\">releases</a> because you are amazing!</p>\n")
+	fmt.Fprintf(w, "<h2>New pasta post</h2>\n")
+	fmt.Fprintf(w, "<p>Just POST your file at the server, e.g. ")
+	fmt.Fprintf(w, "<code>curl -X POST '%s' --data-binary @FILE</code></p>\n", cf.BaseUrl)
+	if cf.DefaultExpire > 0 {
+		fmt.Fprintf(w, "<p>pastas expire by default after %s - Enjoy them while they are fresh!</p>\n", timeHumanReadable(cf.DefaultExpire))
+	}
+	fmt.Fprintf(w, "<h3>File upload</h3>")
+	fmt.Fprintf(w, "<p>Upload your file and make a fresh pasta out of it:</p>")
 	fmt.Fprintf(w, "<form enctype=\"multipart/form-data\" method=\"post\" action=\"/?ret=html\">\n")
 	fmt.Fprintf(w, "<input type=\"file\" name=\"file\">\n")
 	fmt.Fprintf(w, "<input type=\"submit\" value=\"Upload\">\n")
+	fmt.Fprintf(w, "</form>\n")
+	fmt.Fprintf(w, "<h3>Text paste</h3>")
+	fmt.Fprintf(w, "<p>Just paste your contents in the textfield and hit the pasta! button</p>\n")
+	fmt.Fprintf(w, "<form method=\"post\" action=\"/?ret=html\">\n")
+	if cf.MaxPastaSize > 0 {
+		fmt.Fprintf(w, "<textarea name=\"content\" rows=\"10\" cols=\"80\" maxlength=\"%d\"></textarea><br/>\n", cf.MaxPastaSize)
+	} else {
+		fmt.Fprintf(w, "<textarea name=\"content\" rows=\"10\" cols=\"80\"></textarea><br/>\n")
+	}
+	fmt.Fprintf(w, "<input type=\"submit\" value=\"Pasta!\">\n")
 	fmt.Fprintf(w, "</form>\n")
 	fmt.Fprintf(w, "</body></html>")
 }
