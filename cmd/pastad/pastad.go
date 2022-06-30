@@ -284,7 +284,7 @@ ServerError:
 	fmt.Fprintf(w, "server error")
 }
 
-func receiveBody(reader io.Reader, pasta *Pasta) error {
+func receive(reader io.Reader, pasta *Pasta) error {
 	buf := make([]byte, 4096)
 	file, err := os.OpenFile(pasta.Filename, os.O_RDWR|os.O_APPEND, 0640)
 	if err != nil {
@@ -385,21 +385,30 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	}
 
 	if isMultipart(r) {
-		// Close body, also if it's not set as reader
-		defer r.Body.Close()
 		reader, err = receiveMultibody(r, &pasta)
 		if err != nil {
+			pasta.Id = ""
 			return pasta, err
 		}
-	} else if content := r.FormValue("content"); content != "" {
-		reader = io.NopCloser(strings.NewReader(content))
+	}
+	// Check if the input is coming from the POST form
+	inputs := r.URL.Query()["input"]
+	if len(inputs) > 0 && inputs[0] == "form" {
+		// Copy reader, as r.FromValue consumes it's contents
+		defer r.Body.Close()
+		reader = r.Body
+		if content := r.FormValue("content"); content != "" {
+			reader = io.NopCloser(strings.NewReader(content))
+		} else {
+			pasta.Id = "" // Empty pasta
+			return pasta, nil
+		}
 	} else {
-		// Otherwise the message body is the upload content
 		reader = r.Body
 	}
 	defer reader.Close()
 
-	if err := receiveBody(reader, &pasta); err != nil {
+	if err := receive(reader, &pasta); err != nil {
 		return pasta, err
 	}
 	if pasta.Size >= cf.MaxPastaSize {
@@ -669,9 +678,9 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<!doctype html><html><head><title>pasta</title></head>\n")
 	fmt.Fprintf(w, "<body>\n")
 	fmt.Fprintf(w, "<h1>pasta</h1>\n")
-	fmt.Fprintf(w, "<p>Stupid simple paste service written in <code>go</code>. Project page: <a href=\"https://github.com/grisu48/pasta\" target=\"_BLANK\">github.com/grisu48/pasta</a>.</p>\n")
-	fmt.Fprintf(w, "<p>Checkout our fresh CLI utilities in <a href=\"https://github.com/grisu48/pasta/releases/\" target=\"_BLANK\">releases</a> because you are amazing!</p>\n")
-	fmt.Fprintf(w, "<h2>New pasta post</h2>\n")
+	fmt.Fprintf(w, "<p>Stupid simple paste service written in <code>go</code><br/>\n")
+	fmt.Fprintf(w, "Checkout our fresh CLI utilities in <a href=\"https://github.com/grisu48/pasta/releases/\" target=\"_BLANK\">releases</a> because you are amazing!</p>\n")
+	fmt.Fprintf(w, "<h2>Post a new and fresh pasta</h2>\n")
 	fmt.Fprintf(w, "<p>Just POST your file at the server, e.g. ")
 	fmt.Fprintf(w, "<code>curl -X POST '%s' --data-binary @FILE</code></p>\n", cf.BaseUrl)
 	if cf.DefaultExpire > 0 {
@@ -684,8 +693,8 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<input type=\"submit\" value=\"Upload\">\n")
 	fmt.Fprintf(w, "</form>\n")
 	fmt.Fprintf(w, "<h3>Text paste</h3>")
-	fmt.Fprintf(w, "<p>Just paste your contents in the textfield and hit the pasta! button</p>\n")
-	fmt.Fprintf(w, "<form method=\"post\" action=\"/?ret=html\">\n")
+	fmt.Fprintf(w, "<p>Just paste your contents in the textfield and hit the <tt>pasta</tt> button below</p>\n")
+	fmt.Fprintf(w, "<form method=\"post\" action=\"/?input=form&ret=html\">\n")
 	if cf.MaxPastaSize > 0 {
 		fmt.Fprintf(w, "<textarea name=\"content\" rows=\"10\" cols=\"80\" maxlength=\"%d\"></textarea><br/>\n", cf.MaxPastaSize)
 	} else {
@@ -693,6 +702,7 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "<input type=\"submit\" value=\"Pasta!\">\n")
 	fmt.Fprintf(w, "</form>\n")
+	fmt.Fprintf(w, "<p>project page: <a href=\"https://github.com/grisu48/pasta\" target=\"_BLANK\">github.com/grisu48/pasta</a></p>\n")
 	fmt.Fprintf(w, "</body></html>")
 }
 

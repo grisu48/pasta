@@ -31,7 +31,7 @@ fi
 
 ## Setup pasta server
 ../pastad -c pastad.toml -m ../mime.types -B http://127.0.0.1:8200 -b 127.0.0.1:8200 &
-sleep 2        # TODO: Don't do sleep here you lazy ... :-)
+sleep 2
 
 ## Push a testfile
 echo "Testfile 123" > testfile
@@ -44,6 +44,19 @@ link=`../pasta -r http://127.0.0.1:8200 < testfile`
 curl -o testfile2 $link
 diff testfile testfile2
 echo "Testfile 2 matches"
+# Test also sending via curl
+url=`curl -X POST http://127.0.0.1:8200 --data-binary @testfile | grep -Eo 'http://.*'`
+echo "curl stored as $url"
+curl -o testfile3 "$url"
+diff testfile testfile3
+echo "Testfile 3 matches"
+# Test the POST form
+echo -n "testpasta" > testfile4
+url=`curl -X POST "http://127.0.0.1:8200?input=form&content=testpasta" | grep -Eo 'http://.*'`
+curl -o testfile5 "$url"
+diff testfile4 testfile5
+# Test different format in link
+curl -X POST http://127.0.0.1:8200?ret=json --data-binary @testfile
 
 ## Second pasta server with environment variables
 echo "Testing environment variables ... "
