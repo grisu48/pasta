@@ -6,19 +6,25 @@ Stupid simple pastebin service written in go.
 
 ## Run via podman/docker
 
-The easiest way of self-hosting a `pasta` server is via the provided container at `ghcr.io/grisu48/pasta:latest` (NB: the image on [dockerhub](https://hub.docker.com/r/grisu48/pasta/) is deprecated). All you need to do is
+The easiest way of self-hosting a `pasta` server is via the provided container from `ghcr.io/grisu48/pasta:latest`. The container runs fine as rootless container. Setup your own `pasta` instance is as easy as:
 
-* Create your `data` directory
-* Put the [pastad.toml](pastad.toml.example) file there
-* Start the container, mount the `data` directory as `/data`
-* Configure your reverse proxy (e.g. `nginx`) to forward requests to port `8199`
+* Create your `data` directory (holds config + data)
+* Create a [pastad.toml](pastad.toml.example) file therein
+* Start the container, mount the `data` directory as `/data` and publish port `8199`
+* Configure your reverse proxy (e.g. `nginx`) to forward requests to the `pasta` container
 
-Assuming your data is in `/srv/pasta/` you can do
+Assuming you want your data directory be e.g. `/srv/pasta`, prepare your server:
+
+    mkdir /srv/pasta
+    cp pastad.toml.example /srv/pastsa/pastad.toml
+    $EDITOR /srv/pastsa/pastad.toml                     # Modify the configuration to your needs
+
+And then create and run your container with your preferred container engine:
 
     docker container run -d --name pasta -v /srv/pasta:/data -p 127.0.0.1:8199:8199 ghcr.io/grisu48/pasta
     podman container run -d --name pasta -v /srv/pasta:/data -p 127.0.0.1:8199:8199 ghcr.io/grisu48/pasta
 
-Pasta listens then on port 8199 and all you need to do is to configure your reverse proxy (e.g. `nginx`) accordingly:
+`pasta` listens here on port 8199 and all you need to do is to configure your reverse proxy (e.g. `nginx`) accordingly:
 
 ```nginx
 server {
@@ -32,7 +38,8 @@ server {
     }
 }
 ```
-
+ 
+ Note that the good old [dockerhub image](https://hub.docker.com/r/grisu48/pasta/) is deprecated. It still gets updates but will be removed one fine day.
 ## Run on openSUSE
 
 We build openSUSE package at [build.opensuse.org](https://build.opensuse.org/package/show/home%3Aph03nix%3Atools/pasta). To install follow the instructions from [software.opensuse.org](https://software.opensuse.org/download/package?package=pasta&project=home%3Aph03nix%3Atools) or the following snippet:
