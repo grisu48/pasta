@@ -4,21 +4,42 @@
 
 Stupid simple pastebin service written in go.
 
-Fastest way of deploying is via the [`deploy_pasta.sh`](deploy_pasta.sh) script.
+## Run via podman/docker
 
-## Run via docker
-
-The easiest way of self-hosting a `pasta` server is via the [docker image](https://hub.docker.com/r/grisu48/pasta/). All you need to do is
+The easiest way of self-hosting a `pasta` server is via the provided container at `ghcr.io/grisu48/pasta:latest` (NB: the image on [dockerhub](https://hub.docker.com/r/grisu48/pasta/) is deprecated). All you need to do is
 
 * Create your `data` directory
 * Put the [pastad.toml](pastad.toml.example) file there
 * Start the container, mount the `data` directory as `/data`
+* Configure your reverse proxy (e.g. `nginx`) to forward requests to port `8199`
 
 Assuming your data is in `/srv/pasta/` you can do
 
-    docker container run -d -v /srv/pasta:/data -p 127.0.0.1:8199:8199 grisu48/pasta
+    docker container run -d --name pasta -v /srv/pasta:/data -p 127.0.0.1:8199:8199 ghcr.io/grisu48/pasta
+    podman container run -d --name pasta -v /srv/pasta:/data -p 127.0.0.1:8199:8199 ghcr.io/grisu48/pasta
 
-Configure your reverse proxy (e.g. `nginx`) then accordingly. I don't recomment to publish `pastad` on port 80 without a reverse proxy.
+Pasta listens then on port 8199 and all you need to do is to configure your reverse proxy (e.g. `nginx`) accordingly:
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name my-awesome-pasta.server;
+
+    client_max_body_size 32M;
+    location / {
+        proxy_pass http://127.0.0.1:8199/;
+    }
+}
+```
+
+## Run on openSUSE
+
+We build openSUSE package at [build.opensuse.org](https://build.opensuse.org/package/show/home%3Aph03nix%3Atools/pasta). To install follow the instructions from [software.opensuse.org](https://software.opensuse.org/download/package?package=pasta&project=home%3Aph03nix%3Atools) or the following snippet:
+
+	# Tumbleweed
+    zypper addrepo zypper addrepo https://download.opensuse.org/repositories/home:ph03nix:tools/openSUSE_Tumbleweed/home:ph03nix:tools.repo
+    zypper refresh && zypper install pasta
 
 ## Run on RancherOS
 
@@ -35,14 +56,6 @@ $ sudo mkfs.ext4 /dev/sdb1
 $ sudo ros install -d /dev/sda -c cloud-init.yaml
 ```
 
-## Run on openSUSE
-
-We build openSUSE package at [build.opensuse.org](https://build.opensuse.org/package/show/home%3Aph03nix%3Atools/pasta). To install follow the instructions from [software.opensuse.org](https://software.opensuse.org/download/package?package=pasta&project=home%3Aph03nix%3Atools) or the following snippet:
-
-	# Tumbleweed
-    zypper addrepo zypper addrepo https://download.opensuse.org/repositories/home:ph03nix:tools/openSUSE_Tumbleweed/home:ph03nix:tools.repo
-    zypper refresh && zypper install pasta
-
 ## Build and run from source
 
     make pastad                                    # Server
@@ -50,7 +63,7 @@ We build openSUSE package at [build.opensuse.org](https://build.opensuse.org/pac
     make                                           # all
 	make static                                    # static binaries
 
-Then create a `pastad.toml` file using the provided example (`pastad.toml.example`) and run the server with
+Create a `pastad.toml` file using the provided example (`pastad.toml.example`) and run the server with
 
     ./pastad
 
@@ -93,9 +106,10 @@ Assuing the server runs on http://localhost:8199, you can use the `pasta` tool o
 
 ## pasta CLI
 
-`pasta` is the CLI utility for easy handling. For instance, if you want to push the `README.md` file and create a pasta out of it:
+`pasta` is the CLI utility for making the creation of a pasta as easy as possible.  
+For instance, if you want to push the `README.md` file and create a pasta out of it:
 
     pasta README.md
-    pasta -r http://localhost:8199 REAME.md
+    pasta -r http://localhost:8199 REAME.md          # Define a custom remote server
 
-`pasta` reads the `~/.pasta.toml` file (see the [example file](pasta.toml.example))
+`pasta` reads the config from `~/.pasta.toml` (see the [example file](pasta.toml.example))
