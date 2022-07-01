@@ -7,10 +7,7 @@ ADD . /app
 RUN cd /app && make requirements && make pastad-static
 
 FROM scratch
-#RUN mkdir /app
-#RUN mkdir /data
 WORKDIR /data
-COPY --from=build-env /app/pastad /app/pastad
-COPY --from=build-env /app/mime.types /app/mime.types
+COPY --from=build-env /app/pastad /app/mime.types /app/
 ENTRYPOINT ["/app/pastad", "-m", "/app/mime.types", "-c", "/data/pastad.toml"]
 VOLUME ["/data"]
