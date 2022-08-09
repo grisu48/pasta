@@ -390,21 +390,22 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 			pasta.Id = ""
 			return pasta, err
 		}
-	}
-	// Check if the input is coming from the POST form
-	inputs := r.URL.Query()["input"]
-	if len(inputs) > 0 && inputs[0] == "form" {
-		// Copy reader, as r.FromValue consumes it's contents
-		defer r.Body.Close()
-		reader = r.Body
-		if content := r.FormValue("content"); content != "" {
-			reader = io.NopCloser(strings.NewReader(content))
-		} else {
-			pasta.Id = "" // Empty pasta
-			return pasta, nil
-		}
 	} else {
-		reader = r.Body
+		// Check if the input is coming from the POST form
+		inputs := r.URL.Query()["input"]
+		if len(inputs) > 0 && inputs[0] == "form" {
+			// Copy reader, as r.FromValue consumes it's contents
+			defer r.Body.Close()
+			reader = r.Body
+			if content := r.FormValue("content"); content != "" {
+				reader = io.NopCloser(strings.NewReader(content))
+			} else {
+				pasta.Id = "" // Empty pasta
+				return pasta, nil
+			}
+		} else {
+			reader = r.Body
+		}
 	}
 	defer reader.Close()
 
