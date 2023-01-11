@@ -74,13 +74,27 @@ func usage() {
 	fmt.Println("     --ls, --list               List known pasta pushes")
 	fmt.Println("     --gc                       Garbage collector (clean expired pastas)")
 	fmt.Println("")
-	fmt.Println("One or more files can be fined which will be pushed to the given server")
-	fmt.Println("If no file is given, the input from stdin will be pushed")
+	fmt.Println("One or more files can be pushed to the server.")
+	fmt.Println("If no file is given, the input from stdin will be pushed.")
 }
 
-func push(src io.Reader) (Pasta, error) {
+func push(filename string, mime string, src io.Reader) (Pasta, error) {
 	pasta := Pasta{}
-	resp, err := http.Post(cf.RemoteHost+"?ret=json", "text/plain", src)
+
+	client := &http.Client{}
+	// For compatability reasons, set the return format in URL and header for some time
+	req, err := http.NewRequest("POST", cf.RemoteHost+"?ret=json", src)
+	if err != nil {
+		return pasta, err
+	}
+	req.Header.Set("Return-Format", "json")
+	if mime != "" {
+		req.Header.Set("Content-Type", mime)
+	}
+	if filename != "" {
+		req.Header.Set("Filename", filename)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return pasta, err
 	}
@@ -182,6 +196,13 @@ func main() {
 				action = "rm"
 			} else if arg == "--gc" {
 				action = "gc"
+			} else if arg == "--" {
+				// The rest are filenames
+				if i+1 < len(args) {
+					files = append(files, args[i+1:]...)
+				}
+				i = len(args)
+				continue
 			} else {
 				fmt.Fprintf(os.Stderr, "Invalid argument: %s\n", arg)
 				os.Exit(1)
@@ -252,8 +273,9 @@ func main() {
 					continue
 				}
 				// Push file
-				pasta, err := push(file)
-				pasta.Filename = getFilename(filename)
+				f_name := getFilename(filename)
+				pasta, err := push(f_name, "", file)
+				pasta.Filename = f_name
 				pasta.Date = time.Now().Unix()
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "%s\n", err)
@@ -272,7 +294,7 @@ func main() {
 		} else {
 			fmt.Fprintln(os.Stderr, "Reading from stdin")
 			reader := bufio.NewReader(os.Stdin)
-			pasta, err := push(reader)
+			pasta, err := push("", "text/plain", reader)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "%s\n", err)
 				os.Exit(1)

@@ -14,12 +14,13 @@ import (
 )
 
 type Pasta struct {
-	Id         string // id of the pasta
-	Token      string // modification token
-	Filename   string // filename for the pasta on the disk
-	ExpireDate int64  // Unix() date when it will expire
-	Size       int64  // file size
-	Mime       string // mime type
+	Id              string // id of the pasta
+	Token           string // modification token
+	DiskFilename    string // filename for the pasta on the disk
+	ContentFilename string // Filename of the content
+	ExpireDate      int64  // Unix() date when it will expire
+	Size            int64  // file size
+	Mime            string // mime type
 }
 
 func (pasta *Pasta) Expired() bool {
@@ -124,7 +125,7 @@ func (bowl *PastaBowl) RemoveExpired() error {
 
 // get pasta metadata
 func (bowl *PastaBowl) GetPasta(id string) (Pasta, error) {
-	pasta := Pasta{Id: "", Filename: bowl.filename(id)}
+	pasta := Pasta{Id: "", DiskFilename: bowl.filename(id)}
 	stat, err := os.Stat(bowl.filename(id))
 	if err != nil {
 		// Does not exists results in empty pasta result
@@ -134,7 +135,7 @@ func (bowl *PastaBowl) GetPasta(id string) (Pasta, error) {
 		return pasta, err
 	}
 	pasta.Size = stat.Size()
-	file, err := os.OpenFile(pasta.Filename, os.O_RDONLY, 0400)
+	file, err := os.OpenFile(pasta.DiskFilename, os.O_RDONLY, 0400)
 	if err != nil {
 		return pasta, err
 	}
@@ -162,6 +163,8 @@ func (bowl *PastaBowl) GetPasta(id string) (Pasta, error) {
 			pasta.ExpireDate, _ = strconv.ParseInt(value, 10, 64)
 		} else if name == "mime" {
 			pasta.Mime = value
+		} else if name == "filename" {
+			pasta.ContentFilename = value
 		}
 
 	}
@@ -225,8 +228,8 @@ func (bowl *PastaBowl) InsertPasta(pasta *Pasta) error {
 		// TODO: Use crypto rand
 		pasta.Token = RandomString(16)
 	}
-	pasta.Filename = bowl.filename(pasta.Id)
-	file, err := os.OpenFile(pasta.Filename, os.O_RDWR|os.O_CREATE, 0640)
+	pasta.DiskFilename = bowl.filename(pasta.Id)
+	file, err := os.OpenFile(pasta.DiskFilename, os.O_RDWR|os.O_CREATE, 0640)
 	if err != nil {
 		return err
 	}
@@ -241,6 +244,11 @@ func (bowl *PastaBowl) InsertPasta(pasta *Pasta) error {
 	}
 	if pasta.Mime != "" {
 		if _, err := file.Write([]byte(fmt.Sprintf("mime:%s\n", pasta.Mime))); err != nil {
+			return err
+		}
+	}
+	if pasta.ContentFilename != "" {
+		if _, err := file.Write([]byte(fmt.Sprintf("filename:%s\n", pasta.ContentFilename))); err != nil {
 			return err
 		}
 	}
