@@ -21,7 +21,6 @@ type Pasta struct {
 	ExpireDate      int64  // Unix() date when it will expire
 	Size            int64  // file size
 	Mime            string // mime type
-	Public          bool   // public pasta
 }
 
 func (pasta *Pasta) Expired() bool {
@@ -39,14 +38,9 @@ func randBytes(n int) []byte {
 		panic(err)
 	}
 	if i < n {
-		panic(fmt.Errorf("Random generator empty"))
+		panic(fmt.Errorf("random generator empty"))
 	}
 	return buf
-}
-
-func randInt8() int8 {
-	buf := randBytes(1)
-	return int8(buf[0])
 }
 
 func randInt() int {
@@ -56,18 +50,6 @@ func randInt() int {
 		ret += int(buf[i]) << (i * 8)
 	}
 	return ret
-}
-
-func randByte() byte {
-	buf := make([]byte, 1)
-	n, err := rand.Read(buf)
-	if err != nil {
-		panic(err)
-	}
-	if n < 1 {
-		panic(fmt.Errorf("Random generator empty"))
-	}
-	return buf[0]
 }
 
 func RandomString(n int) string {
@@ -191,8 +173,6 @@ func (bowl *PastaBowl) GetPasta(id string) (Pasta, error) {
 			pasta.Mime = value
 		} else if name == "filename" {
 			pasta.ContentFilename = value
-		} else if name == "public" {
-			pasta.Public = strBool(value, pasta.Public)
 		}
 
 	}
@@ -214,10 +194,10 @@ func (bowl *PastaBowl) getPastaFile(id string, flag int) (*os.File, error) {
 		if err != nil {
 			if err == io.EOF {
 				file.Close()
-				return nil, err
+				return nil, errors.New("unexpected end of block")
 			}
 			file.Close()
-			return nil, err
+			return nil, errors.New("unexpected end of block")
 		}
 		if n == 0 {
 			continue
@@ -225,16 +205,14 @@ func (bowl *PastaBowl) getPastaFile(id string, flag int) (*os.File, error) {
 		if buf[0] == '-' {
 			c++
 		} else if buf[0] == '\n' {
-			if c >= 3 {
+			if c == 3 {
 				return file, nil
 			}
 			c = 0
+		} else {
+			c = 0
 		}
 	}
-
-	// This should never occur
-	file.Close()
-	return nil, errors.New("Unexpected end of block")
 }
 
 // Get the file instance to the pasta content (read-only)
@@ -281,11 +259,6 @@ func (bowl *PastaBowl) InsertPasta(pasta *Pasta) error {
 			return err
 		}
 	}
-	if pasta.Public {
-		if _, err := file.Write([]byte("public:true\n")); err != nil {
-			return err
-		}
-	}
 
 	if _, err := file.Write([]byte("---\n")); err != nil {
 		return err
@@ -310,7 +283,7 @@ func (bowl *PastaBowl) GenerateRandomBinId(n int) string {
 }
 
 // GetPublicPastas returns a list of Public pasta IDs, stored in the bowl
-func (bowl *PastaBowl) GetPublicPastas(limit int) ([]string, error) {
+func (bowl *PastaBowl) GetPublicPastas() ([]string, error) {
 	ret := make([]string, 0)
 	filename := fmt.Sprintf("%s/_public", bowl.Directory)
 	if !FileExists(filename) {
@@ -325,17 +298,17 @@ func (bowl *PastaBowl) GetPublicPastas(limit int) ([]string, error) {
 	// Read public pastas, one by one
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		ret = append(ret, scanner.Text())
-	}
-	// Crop if necessary, take the last ones assuming they are more recent
-	if len(ret) > limit {
-		ret = ret[len(ret)-limit:]
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		ret = append(ret, line)
 	}
 	return ret, scanner.Err()
 }
 
 // WritePublicPastas writes a list of public pastas to the public file
-func (bowl *PastaBowl) WritePublicPastas(ids []string) error {
+func (bowl *PastaBowl) WritePublicPastaIDs(ids []string) error {
 	filename := fmt.Sprintf("%s/_public", bowl.Directory)
 	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE, 0640)
 	if err != nil {
@@ -346,4 +319,12 @@ func (bowl *PastaBowl) WritePublicPastas(ids []string) error {
 		file.Write([]byte(fmt.Sprintf("%s\n", id)))
 	}
 	return file.Sync()
+}
+
+func (bowl *PastaBowl) WritePublicPastas(pastas []Pasta) error {
+	ids := make([]string, 0)
+	for _, pasta := range pastas {
+		ids = append(ids, pasta.Id)
+	}
+	return bowl.WritePublicPastaIDs(ids)
 }

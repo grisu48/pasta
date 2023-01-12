@@ -6,6 +6,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -259,6 +260,16 @@ func SendPasta(pasta Pasta, w http.ResponseWriter) error {
 	return err
 }
 
+func removePublicPasta(id string) {
+	copy := make([]Pasta, 0)
+	for _, pasta := range publicPastas {
+		if pasta.Id != id {
+			copy = append(copy, pasta)
+		}
+	}
+	publicPastas = copy
+}
+
 func deletePasta(id string, token string, w http.ResponseWriter) {
 	var pasta Pasta
 	var err error
@@ -279,7 +290,14 @@ func deletePasta(id string, token string, w http.ResponseWriter) {
 			log.Fatalf("Error deleting pasta %s: %s", pasta.Id, err)
 			goto ServerError
 		}
-		fmt.Fprintf(w, "OK")
+		// Also remove from public pastas, if present
+		removePublicPasta(pasta.Id)
+
+		w.WriteHeader(200)
+		fmt.Fprintf(w, "<html><head><meta http-equiv=\"refresh\" content=\"2; url='%s'\" /></head>\n", cf.BaseUrl)
+		fmt.Fprintf(w, "<body>\n")
+		fmt.Fprintf(w, "<p>OK - Redirecting to <a href=\"/\">main page</a> ... </p>")
+		fmt.Fprintf(w, "\n</body>\n</html>")
 	} else {
 		goto Invalid
 	}
@@ -339,25 +357,58 @@ func mimeByFilename(filename string) string {
 	return ""
 }
 
-func receiveMultibody(r *http.Request, pasta *Pasta) (io.ReadCloser, error) {
+func receiveMultibody(r *http.Request, pasta *Pasta) (io.ReadCloser, bool, error) {
+	public := false
+	filename := ""
+
+	// Read http headers first
+	value := r.Header.Get("public")
+	if value != "" {
+		public = strBool(value, public)
+	}
+	// If the content length is given, reject immediately if the size is too big
+	size := r.Header.Get("Content-Length")
+	if size != "" {
+		size, err := strconv.ParseInt(size, 10, 64)
+		if err == nil && size > 0 && size > cf.MaxPastaSize {
+			log.Println("Max size exceeded (Content-Length)")
+			return nil, public, errors.New("content size exceeded")
+		}
+	}
+
+	// Receive multipart form
 	err := r.ParseMultipartForm(cf.MaxPastaSize)
 	if err != nil {
-		return nil, err
+		return nil, public, err
 	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		return nil, err
+		return nil, public, err
 	}
-	filename := header.Filename
-	public := header.Header.Get("public")
-	if public != "" {
-		pasta.Public = strBool(public, pasta.Public)
+
+	// Read file headers
+	filename = header.Filename
+	if filename != "" {
+		pasta.ContentFilename = filename
 	}
+
+	// Read form values after headers, as the form values have precedence
+	form := r.MultipartForm
+	values := form.Value
+	if value, ok := values["public"]; ok {
+		if len(value) > 0 {
+			public = strBool(value[0], public)
+		}
+	}
+
 	// Determine MIME type based on file extension, if present
 	if filename != "" {
 		pasta.Mime = mimeByFilename(filename)
+	} else {
+		pasta.Mime = "application/octet-stream"
 	}
-	return file, err
+
+	return file, public, err
 }
 
 /* Parse expire header value. Returns expire value or 0 on error or invalid settings */
@@ -381,10 +432,11 @@ func isMultipart(r *http.Request) bool {
 	return contentType == "multipart/form-data" || strings.HasPrefix(contentType, "multipart/form-data;")
 }
 
-func ReceivePasta(r *http.Request) (Pasta, error) {
+func ReceivePasta(r *http.Request) (Pasta, bool, error) {
 	var err error
 	var reader io.ReadCloser
 	pasta := Pasta{Id: ""}
+	public := false
 
 	// Parse expire if given
 	if cf.DefaultExpire > 0 {
@@ -396,16 +448,17 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	}
 
 	pasta.Id = removeNonAlphaNumeric(bowl.GenerateRandomBinId(cf.PastaCharacters))
-	// InsertPasta sets filename
-	if err = bowl.InsertPasta(&pasta); err != nil {
-		return pasta, err
-	}
-
+	formRead := true // Read values from the form
 	if isMultipart(r) {
-		reader, err = receiveMultibody(r, &pasta)
+		// InsertPasta to obtain a filename
+		if err = bowl.InsertPasta(&pasta); err != nil {
+			return pasta, public, err
+		}
+		reader, public, err = receiveMultibody(r, &pasta)
 		if err != nil {
+			bowl.DeletePasta(pasta.Id)
 			pasta.Id = ""
-			return pasta, err
+			return pasta, public, err
 		}
 	} else {
 		// Check if the input is coming from the POST form
@@ -413,15 +466,15 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 		if len(inputs) > 0 && inputs[0] == "form" {
 			// Copy reader, as r.FromValue consumes it's contents
 			defer r.Body.Close()
-			reader = r.Body
 			if content := r.FormValue("content"); content != "" {
 				reader = io.NopCloser(strings.NewReader(content))
 			} else {
 				pasta.Id = "" // Empty pasta
-				return pasta, nil
+				return pasta, public, nil
 			}
 		} else {
 			reader = r.Body
+			formRead = false
 		}
 	}
 	defer reader.Close()
@@ -433,14 +486,17 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 		size, err := strconv.ParseInt(size, 10, 64)
 		if err == nil && size > 0 && size > cf.MaxPastaSize {
 			log.Println("Max size exceeded (Content-Length)")
-			return pasta, errors.New("Content size exceeded")
+			return pasta, public, errors.New("content size exceeded")
 		}
 	}
-	// Get property. Try first from form value then from header
+	// Get property. URL parameter has precedence over header
 	prop_get := func(name string) string {
-		val := r.FormValue(name)
-		if val != "" {
-			return val
+		var val string
+		if formRead {
+			val = r.FormValue(name)
+			if val != "" {
+				return val
+			}
 		}
 		val = header.Get(name)
 		if val != "" {
@@ -449,38 +505,44 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 		return ""
 	}
 	// Check if public
-	public := prop_get("public")
-	if public != "" {
-		pasta.Public = strBool(public, pasta.Public)
-	}
-	// Apply content-type, if present
-	mime := prop_get("Content-Type")
-	if mime != "" {
-		pasta.Mime = mime
+	value := prop_get("public")
+	if value != "" {
+		public = strBool(value, public)
 	}
 	// Apply filename, if present
-	filename := prop_get("Filename")
+	// Due to inconsitent naming between URL and http parameters, we have to check for Filename and filename. URL parameters have precedence
+	filename := prop_get("filename")
 	if filename != "" {
 		pasta.ContentFilename = filename
+	} else {
+		filename := prop_get("Filename")
+		if filename != "" {
+			pasta.ContentFilename = filename
+		}
 	}
 
+	// InsertPasta sets filename
+	if err = bowl.InsertPasta(&pasta); err != nil {
+		return pasta, public, err
+	}
 	if err := receive(reader, &pasta); err != nil {
-		return pasta, err
+		return pasta, public, err
 	}
 	if pasta.Size >= cf.MaxPastaSize {
 		log.Println("Max size exceeded while receiving bin")
-		return pasta, errors.New("Bin size exceeded")
+		return pasta, public, errors.New("content size exceeded")
 	}
+	pasta.Mime = "text/plain"
 	if pasta.Size == 0 {
 		bowl.DeletePasta(pasta.Id)
 		pasta.Id = ""
 		pasta.DiskFilename = ""
 		pasta.Token = ""
 		pasta.ExpireDate = 0
-		return pasta, nil
+		return pasta, public, nil
 	}
 
-	return pasta, nil
+	return pasta, public, nil
 }
 
 var delays map[string]int64
@@ -568,7 +630,7 @@ BadRequest:
 
 func handlerPost(w http.ResponseWriter, r *http.Request) {
 	delayIfRequired(r.RemoteAddr)
-	pasta, err := ReceivePasta(r)
+	pasta, public, err := ReceivePasta(r)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "server error")
@@ -579,22 +641,23 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("empty pasta"))
 		} else {
-			if pasta.Public {
-				publicPastas = append(publicPastas, pasta)
-				// Shrink to maximum allowed number
+			// Save into public pastas, if this is public
+			if public {
+				// Store at the beginning
+				pastas := make([]Pasta, 1)
+				pastas[0] = pasta
+				pastas = append(pastas, publicPastas...)
+				publicPastas = pastas
+				// Crop to maximum allowed number
 				if len(publicPastas) > cf.PublicPastas {
 					publicPastas = publicPastas[len(publicPastas)-cf.PublicPastas:]
 				}
-				ids := make([]string, 0)
-				for _, pasta := range publicPastas {
-					ids = append(ids, pasta.Id)
-				}
-				if err := bowl.WritePublicPastas(ids); err != nil {
+				if err := bowl.WritePublicPastas(publicPastas); err != nil {
 					log.Printf("Error writing public pastas: %s", err)
 				}
 			}
 
-			log.Printf("Received bin %s (%d bytes) from %s", pasta.Id, pasta.Size, r.RemoteAddr)
+			log.Printf("Received pasta %s (%d bytes) from %s", pasta.Id, pasta.Size, r.RemoteAddr)
 			w.WriteHeader(http.StatusOK)
 			url := fmt.Sprintf("%s/%s", cf.BaseUrl, pasta.Id)
 			// Return format. URL has precedence over http heder
@@ -609,19 +672,22 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 				fmt.Fprintf(w, "<body>\n")
 				fmt.Fprintf(w, "<h1>pasta</h1>\n")
 				deleteLink := fmt.Sprintf("%s/delete?id=%s&token=%s", cf.BaseUrl, pasta.Id, pasta.Token)
-				fmt.Fprintf(w, "<p>Pasta: <a href=\"%s\">%s</a> <a href=\"%s\">[Delete]</a>.<br/>", url, url, deleteLink)
+				fmt.Fprintf(w, "<p>Pasta: <a href=\"%s\">%s</a> | <a href=\"%s\">🗑️ Delete</a><br/>", url, url, deleteLink)
 				fmt.Fprintf(w, "<pre>")
-				if pasta.Public {
-					fmt.Fprintf(w, "Public:             yes\n")
-				}
 				if pasta.ContentFilename != "" {
 					fmt.Fprintf(w, "Filename:           %s\n", pasta.ContentFilename)
 				}
 				if pasta.Mime != "" {
-					fmt.Fprintf(w, "Mime-Type:          %s\n", pasta.ContentFilename)
+					fmt.Fprintf(w, "Mime-Type:          %s\n", pasta.Mime)
+				}
+				if pasta.Size > 0 {
+					fmt.Fprintf(w, "Size:               %d B\n", pasta.Size)
 				}
 				if pasta.ExpireDate > 0 {
 					fmt.Fprintf(w, "Expiration:         %s\n", time.Unix(pasta.ExpireDate, 0).Format("2006-01-02-15:04:05"))
+				}
+				if public {
+					fmt.Fprintf(w, "Public:             yes\n")
 				}
 				fmt.Fprintf(w, "Modification token: %s\n</pre>\n", pasta.Token)
 				fmt.Fprintf(w, "<p>That was fun! Fancy <a href=\"%s\">another one?</a>.</p>\n", cf.BaseUrl)
@@ -705,6 +771,9 @@ BadRequest:
 func handlerHealth(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "OK")
 }
+func handlerHealthJson(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprintf(w, "{\"status\":\"ok\"}")
+}
 
 func handlerPublic(w http.ResponseWriter, r *http.Request) {
 	if cf.PublicPastas == 0 {
@@ -712,11 +781,53 @@ func handlerPublic(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "public pasta listing is disabled")
 		return
 	}
+	w.WriteHeader(200)
+	w.Write([]byte("<html>\n<head>\n<title>public pastas</title>\n</head>\n<body>"))
+	w.Write([]byte("<h2>public pastas</h2>\n"))
+	w.Write([]byte("<table>\n"))
+	w.Write([]byte("<tr><td>Filename</td><td>Size</td></tr>\n"))
 	for _, pasta := range publicPastas {
-		if pasta.Public {
-			fmt.Fprintf(w, "%s\n", pasta.Id)
+		filename := pasta.ContentFilename
+		if filename == "" {
+			filename = pasta.Id
 		}
+		w.Write([]byte(fmt.Sprintf("<tr><td><a href=\"%s\">%s</a></td><td>%d B</td></tr>\n", pasta.Id, filename, pasta.Size)))
 	}
+	w.Write([]byte("</table>\n"))
+	fmt.Fprintf(w, "<p>The server presents at most %d public pastas.<p>\n", cf.PublicPastas)
+	w.Write([]byte("</body>\n"))
+}
+
+func handlerPublicJson(w http.ResponseWriter, r *http.Request) {
+	if cf.PublicPastas == 0 {
+		w.WriteHeader(400)
+		fmt.Fprintf(w, "public pasta listing is disabled")
+		return
+	}
+	type PublicPasta struct {
+		Filename string `json:"filename"`
+		Size     int64  `json:"size"`
+		URL      string `json:"url"`
+	}
+	pastas := make([]PublicPasta, 0)
+	for _, pasta := range publicPastas {
+		filename := pasta.ContentFilename
+		if filename == "" {
+			filename = pasta.Id
+		}
+		pastas = append(pastas, PublicPasta{Filename: filename, URL: fmt.Sprintf("%s/%s", cf.BaseUrl, pasta.Id), Size: pasta.Size})
+	}
+	buf, err := json.Marshal(pastas)
+	if err != nil {
+		log.Printf("json error (public pastas): %s\n", err)
+		goto ServerError
+	}
+	w.WriteHeader(200)
+	w.Write(buf)
+	return
+ServerError:
+	w.WriteHeader(500)
+	w.Write([]byte("Server error"))
 }
 
 func handlerRobots(w http.ResponseWriter, r *http.Request) {
@@ -770,20 +881,23 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<!doctype html><html><head><title>pasta</title></head>\n")
 	fmt.Fprintf(w, "<body>\n")
 	fmt.Fprintf(w, "<h1>pasta</h1>\n")
-	fmt.Fprintf(w, "<p>Stupid simple paste service. <a href=\"https://codeberg.org/grisu48/pasta\">[Project page]</a></p>\n")
+	fmt.Fprintf(w, "<p>pasta is a stupid simple pastebin service for easy usage and deployment.</p>\n")
 	// List public pastas, if enabled and available
 	if cf.PublicPastas > 0 && len(publicPastas) > 0 {
 		fmt.Fprintf(w, "<h2>Public pastas</h2>\n")
 		fmt.Fprintf(w, "<table>\n")
-		fmt.Fprintf(w, "<tr><td>Filename</td><td>Size</td><td>Link</td></tr>\n")
+		fmt.Fprintf(w, "<tr><td>Filename</td><td>Size</td></tr>\n")
 		for _, pasta := range publicPastas {
 			filename := pasta.ContentFilename
 			if filename == "" {
 				filename = pasta.Id
 			}
-			fmt.Fprintf(w, "<tr><td>%s</td><td>%d</td><td><a href=\"%s\">%s</a></td></tr>\n", filename, pasta.Size, pasta.Id, pasta.Id)
+			fmt.Fprintf(w, "<tr><td><a href=\"%s\">%s</a></td><td>%d B</td></tr>\n", pasta.Id, filename, pasta.Size)
 		}
 		fmt.Fprintf(w, "</table>\n")
+		if len(publicPastas) == cf.PublicPastas {
+			fmt.Fprintf(w, "<p>The server presents at most %d public pastas.<p>\n", cf.PublicPastas)
+		}
 	}
 	fmt.Fprintf(w, "<h2>Post a new pasta</h2>\n")
 	fmt.Fprintf(w, "<p><code>curl -X POST '%s' --data-binary @FILE</code></p>\n", cf.BaseUrl)
@@ -813,7 +927,8 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "<input type=\"submit\" value=\"Pasta!\">\n")
 	fmt.Fprintf(w, "</form>\n")
-	fmt.Fprintf(w, "<p>project page: <a href=\"https://github.com/grisu48/pasta\" target=\"_BLANK\">github.com/grisu48/pasta</a></p>\n")
+	fmt.Fprintf(w, "\n<hr/>\n")
+	fmt.Fprintf(w, "<p>project page: <a href=\"https://codeberg.org/grisu48/pasta\" target=\"_BLANK\">codeberg.org/grisu48/pasta</a></p>\n")
 	fmt.Fprintf(w, "</body></html>")
 }
 
@@ -912,13 +1027,21 @@ func main() {
 
 	// Load public pastas
 	if cf.PublicPastas > 0 {
-		pastas, err := bowl.GetPublicPastas(cf.PublicPastas)
+		pastas, err := bowl.GetPublicPastas()
 		if err != nil {
 			log.Printf("Error loading public pastas: %s", err)
 		} else {
+			// Crop if necessary
+			if len(pastas) > cf.PublicPastas {
+				pastas = pastas[len(pastas)-cf.PublicPastas:]
+				bowl.WritePublicPastaIDs(pastas)
+			}
 			for _, id := range pastas {
+				if id == "" {
+					continue
+				}
 				pasta, err := bowl.GetPasta(id)
-				if err == nil {
+				if err == nil && pasta.Id != "" {
 					publicPastas = append(publicPastas, pasta)
 				}
 			}
@@ -934,7 +1057,9 @@ func main() {
 	// Setup webserver
 	http.HandleFunc("/", handler)
 	http.HandleFunc("/health", handlerHealth)
+	http.HandleFunc("/health.json", handlerHealthJson)
 	http.HandleFunc("/public", handlerPublic)
+	http.HandleFunc("/public.json", handlerPublicJson)
 	http.HandleFunc("/delete", handlerDelete)
 	http.HandleFunc("/robots.txt", handlerRobots)
 	log.Printf("Serving http://%s", cf.BindAddr)
