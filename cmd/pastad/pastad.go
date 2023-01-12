@@ -238,9 +238,14 @@ func SendPasta(pasta Pasta, w http.ResponseWriter) error {
 		return err
 	}
 	defer file.Close()
+	w.Header().Set("Content-Disposition", "inline")
 	w.Header().Set("Content-Length", strconv.FormatInt(pasta.Size, 10))
 	if pasta.Mime != "" {
 		w.Header().Set("Content-Type", pasta.Mime)
+	}
+	if pasta.ContentFilename != "" {
+		w.Header().Set("Filename", pasta.ContentFilename)
+
 	}
 	_, err = io.Copy(w, file)
 	return err
@@ -286,7 +291,7 @@ ServerError:
 
 func receive(reader io.Reader, pasta *Pasta) error {
 	buf := make([]byte, 4096)
-	file, err := os.OpenFile(pasta.Filename, os.O_RDWR|os.O_APPEND, 0640)
+	file, err := os.OpenFile(pasta.DiskFilename, os.O_RDWR|os.O_APPEND, 0640)
 	if err != nil {
 		file.Close()
 		return err
@@ -419,7 +424,7 @@ func ReceivePasta(r *http.Request) (Pasta, error) {
 	if pasta.Size == 0 {
 		bowl.DeletePasta(pasta.Id)
 		pasta.Id = ""
-		pasta.Filename = ""
+		pasta.DiskFilename = ""
 		pasta.Token = ""
 		pasta.ExpireDate = 0
 		return pasta, nil
@@ -527,9 +532,9 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 			log.Printf("Received bin %s (%d bytes) from %s", pasta.Id, pasta.Size, r.RemoteAddr)
 			w.WriteHeader(http.StatusOK)
 			url := fmt.Sprintf("%s/%s", cf.BaseUrl, pasta.Id)
-			// Return format
+			// Return format. URL has precedence over http heder
+			retFormat := r.Header.Get("Return-Format")
 			retFormats := r.URL.Query()["ret"]
-			retFormat := ""
 			if len(retFormats) > 0 {
 				retFormat = retFormats[0]
 			}
@@ -696,6 +701,7 @@ func handlerIndex(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "<h3>Text paste</h3>")
 	fmt.Fprintf(w, "<p>Just paste your contents in the textfield and hit the <tt>pasta</tt> button below</p>\n")
 	fmt.Fprintf(w, "<form method=\"post\" action=\"/?input=form&ret=html\">\n")
+	fmt.Fprintf(w, "Filename (optional): <input type=\"text\" name=\"filename\" value=\"\" max=\"255\"><br/>\n")
 	if cf.MaxPastaSize > 0 {
 		fmt.Fprintf(w, "<textarea name=\"content\" rows=\"10\" cols=\"80\" maxlength=\"%d\"></textarea><br/>\n", cf.MaxPastaSize)
 	} else {
