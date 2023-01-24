@@ -38,14 +38,9 @@ func randBytes(n int) []byte {
 		panic(err)
 	}
 	if i < n {
-		panic(fmt.Errorf("Random generator empty"))
+		panic(fmt.Errorf("random generator empty"))
 	}
 	return buf
-}
-
-func randInt8() int8 {
-	buf := randBytes(1)
-	return int8(buf[0])
 }
 
 func randInt() int {
@@ -55,18 +50,6 @@ func randInt() int {
 		ret += int(buf[i]) << (i * 8)
 	}
 	return ret
-}
-
-func randByte() byte {
-	buf := make([]byte, 1)
-	n, err := rand.Read(buf)
-	if err != nil {
-		panic(err)
-	}
-	if n < 1 {
-		panic(fmt.Errorf("Random generator empty"))
-	}
-	return buf[0]
 }
 
 func RandomString(n int) string {
@@ -85,6 +68,31 @@ func FileExists(filename string) bool {
 		return false
 	}
 	return !os.IsNotExist(err)
+}
+
+func strBool(val string, def bool) bool {
+	val = strings.TrimSpace(val)
+	val = strings.ToLower(val)
+
+	if val == "true" {
+		return true
+	} else if val == "yes" {
+		return true
+	} else if val == "on" {
+		return true
+	} else if val == "1" {
+		return true
+	} else if val == "false" {
+		return false
+	} else if val == "no" {
+		return false
+	} else if val == "off" {
+		return false
+	} else if val == "0" {
+		return false
+	}
+
+	return def
 }
 
 /* PastaBowl is the main storage instance */
@@ -186,10 +194,10 @@ func (bowl *PastaBowl) getPastaFile(id string, flag int) (*os.File, error) {
 		if err != nil {
 			if err == io.EOF {
 				file.Close()
-				return nil, err
+				return nil, errors.New("unexpected end of block")
 			}
 			file.Close()
-			return nil, err
+			return nil, errors.New("unexpected end of block")
 		}
 		if n == 0 {
 			continue
@@ -197,15 +205,14 @@ func (bowl *PastaBowl) getPastaFile(id string, flag int) (*os.File, error) {
 		if buf[0] == '-' {
 			c++
 		} else if buf[0] == '\n' {
-			if c >= 3 {
+			if c == 3 {
 				return file, nil
 			}
 			c = 0
+		} else {
+			c = 0
 		}
 	}
-	// This should never occur
-	file.Close()
-	return nil, errors.New("Unexpected end of block")
 }
 
 // Get the file instance to the pasta content (read-only)
@@ -273,4 +280,51 @@ func (bowl *PastaBowl) GenerateRandomBinId(n int) string {
 			return id
 		}
 	}
+}
+
+// GetPublicPastas returns a list of Public pasta IDs, stored in the bowl
+func (bowl *PastaBowl) GetPublicPastas() ([]string, error) {
+	ret := make([]string, 0)
+	filename := fmt.Sprintf("%s/_public", bowl.Directory)
+	if !FileExists(filename) {
+		return ret, nil
+	}
+
+	file, err := os.OpenFile(filename, os.O_RDONLY, 0400)
+	if err != nil {
+		return ret, err
+	}
+	defer file.Close()
+	// Read public pastas, one by one
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		ret = append(ret, line)
+	}
+	return ret, scanner.Err()
+}
+
+// WritePublicPastas writes a list of public pastas to the public file
+func (bowl *PastaBowl) WritePublicPastaIDs(ids []string) error {
+	filename := fmt.Sprintf("%s/_public", bowl.Directory)
+	file, err := os.OpenFile(filename, os.O_WRONLY|os.O_CREATE, 0640)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	for _, id := range ids {
+		file.Write([]byte(fmt.Sprintf("%s\n", id)))
+	}
+	return file.Sync()
+}
+
+func (bowl *PastaBowl) WritePublicPastas(pastas []Pasta) error {
+	ids := make([]string, 0)
+	for _, pasta := range pastas {
+		ids = append(ids, pasta.Id)
+	}
+	return bowl.WritePublicPastaIDs(ids)
 }

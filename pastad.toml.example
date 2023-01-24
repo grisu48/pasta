@@ -6,3 +6,4 @@ PastaCharacters = 8                  # Number of characters for pasta id
 Expire = 2592000                     # Default expire in seconds (1 Month)
 Cleanup = 3600                       # Cleanup interval in seconds (1 hour)
 RequestDelay = 2000                  # Milliseconds between POST/DELETE requests per host
+PublicPastas = 0                     # Number of public pastas to display or 0 to disable public display (default)
