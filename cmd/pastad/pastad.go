@@ -728,6 +728,14 @@ func main() {
 	if cf.PastaDir == "" {
 		cf.PastaDir = "."
 	}
+
+	// Preparation steps
+	baseURL, err := ApplyMacros(cf.BaseUrl)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error applying macros: %s", err)
+		os.Exit(1)
+	}
+	cf.BaseUrl = baseURL
 	bowl.Directory = cf.PastaDir
 	os.Mkdir(bowl.Directory, os.ModePerm)
 
