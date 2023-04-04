@@ -8,13 +8,13 @@ requirements:
 	go get github.com/BurntSushi/toml
 	go get github.com/akamensky/argparse
 	
-pasta: cmd/pasta/pasta.go cmd/pasta/storage.go
-	go build $^
-pastad: cmd/pastad/pastad.go cmd/pastad/storage.go
-	go build $^
-pasta-static: cmd/pasta/pasta.go cmd/pasta/storage.go
+pasta: cmd/pasta/*.go
+	go build -o pasta $^
+pastad: cmd/pastad/*.go
+	go build -o pastad $^
+pasta-static: cmd/pasta/*.go
 	CGO_ENABLED=0 go build -ldflags="-w -s" -o pasta $^
-pastad-static: cmd/pastad/pastad.go cmd/pastad/storage.go
+pastad-static: cmd/pastad/*.go
 	CGO_ENABLED=0 go build -ldflags="-w -s" -o pastad $^
 
 test: pastad pasta
@@ -27,3 +27,4 @@ container-docker: Dockerfile pasta pastad
 
 container-podman: Dockerfile pasta pastad
 	podman build . -t feldspaten.org/pasta
+
