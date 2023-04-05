@@ -182,3 +182,17 @@ func timeHumanReadable(timestamp int64) string {
 		return fmt.Sprintf("%d days", days)
 	}
 }
+
+/* Apply custom macros in the given string and return the result. The following macros are supports:
+* `$hostname` - Replace with the system hostname
+ */
+func ApplyMacros(txt string) (string, error) {
+	if strings.Contains(txt, "$hostname") {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return "", err
+		}
+		txt = strings.ReplaceAll(txt, "$hostname", hostname)
+	}
+	return txt, nil
+}
