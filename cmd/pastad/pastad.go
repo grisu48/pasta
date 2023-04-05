@@ -21,7 +21,7 @@ import (
 	"github.com/akamensky/argparse"
 )
 
-const VERSION = "0.2"
+const VERSION = "0.7"
 
 var cf Config
 var bowl PastaBowl
