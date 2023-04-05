@@ -17,6 +17,8 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+const VERSION = "0.7"
+
 type Config struct {
 	RemoteHost  string       `toml:"RemoteHost"`
 	RemoteHosts []RemoteHost `toml:"Remote"`
@@ -73,6 +75,7 @@ func usage() {
 	fmt.Println("")
 	fmt.Println("     --ls, --list               List known pasta pushes")
 	fmt.Println("     --gc                       Garbage collector (clean expired pastas)")
+	fmt.Println("     --version                  Show client version")
 	fmt.Println("")
 	fmt.Println("One or more files can be pushed to the server.")
 	fmt.Println("If no file is given, the input from stdin will be pushed.")
@@ -196,6 +199,9 @@ func main() {
 				action = "rm"
 			} else if arg == "--gc" {
 				action = "gc"
+			} else if arg == "--version" {
+				fmt.Printf("pasta version %s\n", VERSION)
+				os.Exit(1)
 			} else if arg == "--" {
 				// The rest are filenames
 				if i+1 < len(args) {
