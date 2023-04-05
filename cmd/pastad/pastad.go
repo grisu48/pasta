@@ -5,7 +5,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,224 +21,14 @@ import (
 	"github.com/akamensky/argparse"
 )
 
-type Config struct {
-	BaseUrl         string `toml:"BaseURL"`  // Instance base URL
-	PastaDir        string `toml:"PastaDir"` // dir where pasta are stored
-	BindAddr        string `toml:"BindAddress"`
-	MaxPastaSize    int64  `toml:"MaxPastaSize"` // Max bin size in bytes
-	PastaCharacters int    `toml:"PastaCharacters"`
-	MimeTypesFile   string `toml:"MimeTypes"`    // Load mime types from this file
-	DefaultExpire   int64  `toml:"Expire"`       // Default expire time for a new pasta in seconds
-	CleanupInterval int    `toml:"Cleanup"`      // Seconds between cleanup cycles
-	RequestDelay    int64  `toml:"RequestDelay"` // Required delay between requests in milliseconds
-	PublicPastas    int    `toml:"PublicPastas"` // Number of pastas to display on public page or 0 to disable
-}
-
-type ParserConfig struct {
-	ConfigFile      *string
-	BaseURL         *string
-	PastaDir        *string
-	BindAddr        *string
-	MaxPastaSize    *int // parser doesn't support int64
-	PastaCharacters *int
-	MimeTypesFile   *string
-	DefaultExpire   *int // parser doesn't support int64
-	CleanupInterval *int
-	PublicPastas    *int
-}
+const VERSION = "0.2"
 
 var cf Config
 var bowl PastaBowl
 var publicPastas []Pasta
 var mimeExtensions map[string]string
-
-func CreateDefaultConfigfile(filename string) error {
-	hostname, _ := os.Hostname()
-	if hostname == "" {
-		hostname = "localhost"
-	}
-	content := []byte(fmt.Sprintf("BaseURL = 'http://%s:8199'\nBindAddress = ':8199'\nPastaDir = 'pastas'\nMaxPastaSize = 5242880       # 5 MiB\nPastaCharacters = 8\nExpire = 2592000             # 1 month\nCleanup = 3600               # cleanup interval in seconds\nRequestDelay = 2000\nPublicPastas = 0\n", hostname))
-	file, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	if _, err = file.Write(content); err != nil {
-		return err
-	}
-	if err := file.Chmod(0640); err != nil {
-		return err
-	}
-	return file.Close()
-}
-
-// SetDefaults sets the default values to a config instance
-func (cf *Config) SetDefaults() {
-	cf.BaseUrl = "http://localhost:8199"
-	cf.PastaDir = "pastas/"
-	cf.BindAddr = "127.0.0.1:8199"
-	cf.MaxPastaSize = 1024 * 1024 * 25 // Default max size: 25 MB
-	cf.PastaCharacters = 8             // Note: Never use less than 8 characters!
-	cf.MimeTypesFile = "mime.types"
-	cf.DefaultExpire = 0
-	cf.CleanupInterval = 60 * 60 // Default cleanup is once per hour
-	cf.RequestDelay = 0          // By default not spam protection (Assume we are in safe environment)
-	cf.PublicPastas = 0
-}
-
-// getenv reads a given environmental variable and returns it's value if present or defval if not present or empty
-func getenv(key string, defval string) string {
-	val := os.Getenv(key)
-	if val == "" {
-		return defval
-	}
-	return val
-}
-
-// getenv reads a given environmental variable as integer and returns it's value if present or defval if not present or empty
-func getenv_i(key string, defval int) int {
-	val := os.Getenv(key)
-	if val == "" {
-		return defval
-	}
-	if i32, err := strconv.Atoi(val); err != nil {
-		return defval
-	} else {
-		return i32
-	}
-}
-
-// getenv reads a given environmental variable as integer and returns it's value if present or defval if not present or empty
-func getenv_i64(key string, defval int64) int64 {
-	val := os.Getenv(key)
-	if val == "" {
-		return defval
-	}
-	if i64, err := strconv.ParseInt(val, 10, 64); err != nil {
-		return defval
-	} else {
-		return i64
-	}
-}
-
-// ReadEnv reads the environmental variables and sets the config accordingly
-func (cf *Config) ReadEnv() {
-	cf.BaseUrl = getenv("PASTA_BASEURL", cf.BaseUrl)
-	cf.PastaDir = getenv("PASTA_PASTADIR", cf.PastaDir)
-	cf.BindAddr = getenv("PASTA_BINDADDR", cf.BindAddr)
-	cf.MaxPastaSize = getenv_i64("PASTA_MAXSIZE", cf.MaxPastaSize)
-	cf.PastaCharacters = getenv_i("PASTA_CHARACTERS", cf.PastaCharacters)
-	cf.MimeTypesFile = getenv("PASTA_MIMEFILE", cf.MimeTypesFile)
-	cf.DefaultExpire = getenv_i64("PASTA_EXPIRE", cf.DefaultExpire)
-	cf.CleanupInterval = getenv_i("PASTA_CLEANUP", cf.CleanupInterval)
-	cf.RequestDelay = getenv_i64("PASTA_REQUESTDELAY", cf.RequestDelay)
-	cf.PublicPastas = getenv_i("PASTA_PUBLICPASTAS", cf.PublicPastas)
-}
-
-func (pc *ParserConfig) ApplyTo(cf *Config) {
-	if pc.BaseURL != nil && *pc.BaseURL != "" {
-		cf.BaseUrl = *pc.BaseURL
-	}
-	if pc.PastaDir != nil && *pc.PastaDir != "" {
-		cf.PastaDir = *pc.PastaDir
-	}
-	if pc.BindAddr != nil && *pc.BindAddr != "" {
-		cf.BindAddr = *pc.BindAddr
-	}
-	if pc.MaxPastaSize != nil && *pc.MaxPastaSize > 0 {
-		cf.MaxPastaSize = int64(*pc.MaxPastaSize)
-	}
-	if pc.PastaCharacters != nil && *pc.PastaCharacters > 0 {
-		cf.PastaCharacters = *pc.PastaCharacters
-	}
-	if pc.MimeTypesFile != nil && *pc.MimeTypesFile != "" {
-		cf.MimeTypesFile = *pc.MimeTypesFile
-	}
-	if pc.DefaultExpire != nil && *pc.DefaultExpire > 0 {
-		cf.DefaultExpire = int64(*pc.DefaultExpire)
-	}
-	if pc.CleanupInterval != nil && *pc.CleanupInterval > 0 {
-		cf.CleanupInterval = *pc.CleanupInterval
-	}
-	if pc.PublicPastas != nil && *pc.PublicPastas > 0 {
-		cf.PublicPastas = *pc.PublicPastas
-	}
-}
-
-func isAlphaNumeric(c rune) bool {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
-}
-
-func containsOnlyAlphaNumeric(input string) bool {
-	for _, c := range input {
-		if !isAlphaNumeric(c) {
-			return false
-		}
-	}
-	return true
-}
-
-func removeNonAlphaNumeric(input string) string {
-	ret := ""
-	for _, c := range input {
-		if isAlphaNumeric(c) {
-			ret += string(c)
-		}
-	}
-	return ret
-}
-
-func ExtractPastaId(path string) (string, error) {
-	var id string
-	i := strings.LastIndex(path, "/")
-	if i < 0 {
-		id = path
-	} else {
-		id = path[i+1:]
-	}
-	if !containsOnlyAlphaNumeric(id) {
-		return "", fmt.Errorf("invalid id")
-	}
-	return id, nil
-}
-
-/* Load MIME types file. MIME types file is a simple text file that describes mime types based on file extenstions.
- * The format of the file is
- * EXTENSION = MIMETYPE
- */
-func loadMimeTypes(filename string) (map[string]string, error) {
-	ret := make(map[string]string, 0)
-
-	file, err := os.OpenFile(filename, os.O_RDONLY, 0400)
-	if err != nil {
-		return ret, err
-	}
-	defer file.Close()
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || line[0] == '#' {
-			continue
-		}
-		i := strings.Index(line, "=")
-		if i < 0 {
-			continue
-		}
-		name, value := strings.TrimSpace(line[:i]), strings.TrimSpace(line[i+1:])
-		if name != "" && value != "" {
-			ret[name] = value
-		}
-	}
-
-	return ret, scanner.Err()
-}
-
-func takeFirst(arr []string) string {
-	if len(arr) == 0 {
-		return ""
-	}
-	return arr[0]
-}
+var delays map[string]int64
+var delayMutex sync.Mutex
 
 func SendPasta(pasta Pasta, w http.ResponseWriter) error {
 	file, err := bowl.GetPastaReader(pasta.Id)
@@ -342,19 +131,6 @@ func receive(reader io.Reader, pasta *Pasta) error {
 		}
 	}
 	return nil
-}
-
-/* try to determine the mime type by file extension. Returns empty string on failure */
-func mimeByFilename(filename string) string {
-	i := strings.LastIndex(filename, ".")
-	if i < 0 {
-		return ""
-	}
-	extension := filename[i+1:]
-	if mime, ok := mimeExtensions[extension]; ok {
-		return mime
-	}
-	return ""
 }
 
 func receiveMultibody(r *http.Request, pasta *Pasta) (io.ReadCloser, bool, error) {
@@ -543,28 +319,6 @@ func ReceivePasta(r *http.Request) (Pasta, bool, error) {
 	}
 
 	return pasta, public, nil
-}
-
-var delays map[string]int64
-var delayMutex sync.Mutex
-
-/* Extract the remote IP address of the given remote
- * The remote is expected to come from http.Request and contain the IP address plus the port */
-func extractRemoteIP(remote string) string {
-	// Check if IPv6
-	i := strings.Index(remote, "[")
-	if i >= 0 {
-		j := strings.Index(remote, "]")
-		if j <= i {
-			return remote
-		}
-		return remote[i+1 : j]
-	}
-	i = strings.Index(remote, ":")
-	if i > 0 {
-		return remote[:i]
-	}
-	return remote
 }
 
 /* Delay a request for the given remote if required by spam protection */
@@ -765,7 +519,6 @@ BadRequest:
 	} else {
 		fmt.Fprintf(w, "%s", err)
 	}
-	return
 }
 
 func handlerHealth(w http.ResponseWriter, r *http.Request) {
@@ -841,40 +594,6 @@ func handlerDelete(w http.ResponseWriter, r *http.Request) {
 	id := takeFirst(r.URL.Query()["id"])
 	token := takeFirst(r.URL.Query()["token"])
 	deletePasta(id, token, w)
-}
-
-func timeHumanReadable(timestamp int64) string {
-	if timestamp < 60 {
-		return fmt.Sprintf("%d s", timestamp)
-	}
-
-	minutes := timestamp / 60
-	seconds := timestamp - (minutes * 60)
-	if minutes < 60 {
-		return fmt.Sprintf("%d:%d min", minutes, seconds)
-	}
-
-	hours := minutes / 60
-	minutes -= hours * 60
-	if hours < 24 {
-		return fmt.Sprintf("%d s", hours)
-	}
-
-	days := hours / 24
-	hours -= days * 24
-	if days > 365 {
-		years := float32(days) / 365.0
-		return fmt.Sprintf("%.2f years", years)
-	} else if days > 28 {
-		weeks := days / 7
-		if weeks > 4 {
-			months := days / 30
-			return fmt.Sprintf("%d months", months)
-		}
-		return fmt.Sprintf("%d weeks", weeks)
-	} else {
-		return fmt.Sprintf("%d days", days)
-	}
 }
 
 func handlerIndex(w http.ResponseWriter, r *http.Request) {
@@ -979,7 +698,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "%s\n", parser.Usage(err))
 		os.Exit(1)
 	}
-	log.Println("Starting pasta server ... ")
+	log.Printf("Starting pasta server v%s ... \n", VERSION)
 	configFile := *parseCf.ConfigFile
 	if configFile != "" {
 		if FileExists(configFile) {
