@@ -64,6 +64,21 @@ In addition to the config file, `pastad` can also be configured via environmenta
 | `PASTA_REQUESTDELAY` | Delay between requests from the same host in milliseconds |
 | `PASTA_PUBLICPASTAS` | Number of public pastas to be displayed |
 
+### macros
+
+The `BASEURL` setting, defined either via configuration file or via the `PASTA_BASEURL` environment variable, supports custom macros, that should help you in various scenarios. Macros are pre-defined strings, which will be replaced.
+
+The following macros are currently supported
+
+| Macro | Replaced with | Example |
+| `$hostname` | Local hostname | `localhost` |
+
+A usage example would be to e.g. define the following in your local `pastad.conf`
+
+```toml
+BaseURL = "http://$hostname:8199"    # base URL as used within pasta
+```
+
 # Usage
 
 Assuing the server runs on http://localhost:8199, you can use the `pasta` CLI tool (See below) or `curl`:
