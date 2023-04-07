@@ -157,6 +157,48 @@ func getFilename(filename string) string {
 	}
 }
 
+/* Try to parse an integer range (1..2 or 5-9) - returns the range and a boolean indicating, if such a range could have been parsed */
+func tryParseRange(txt string) (int, int, bool) {
+	if txt == "" {
+		return 0, 0, false
+	}
+	if i := strings.Index(txt, "-"); i > 0 {
+		if i == 0 || i >= len(txt)-1 {
+			// Incomplete range
+			return 0, 0, false
+		}
+		l, r := txt[:i], txt[i+1:]
+		// Try to parse
+		i, err := strconv.Atoi(l)
+		if err != nil {
+			return 0, 0, false
+		}
+		j, err := strconv.Atoi(r)
+		if err != nil {
+			return 0, 0, false
+		}
+		return i, j, true
+	}
+	if i := strings.Index(txt, ".."); i > 1 {
+		if i == 0 || i >= len(txt)-2 {
+			// Incomplete range
+			return 0, 0, false
+		}
+		l, r := txt[:i], txt[i+2:]
+		// Try to parse
+		i, err := strconv.Atoi(l)
+		if err != nil {
+			return 0, 0, false
+		}
+		j, err := strconv.Atoi(r)
+		if err != nil {
+			return 0, 0, false
+		}
+		return i, j, true
+	}
+	return 0, 0, false
+}
+
 func main() {
 	cf.RemoteHost = "http://localhost:8199"
 	action := ""
@@ -333,7 +375,30 @@ func main() {
 					fmt.Fprintf(os.Stderr, "Cannot find pasta '%d'\n", id)
 					os.Exit(1)
 				}
+				if id < 0 || id >= len(stor.Pastas) {
+					fmt.Fprintf(os.Stderr, "Pasta index %d out of range\n", id)
+					os.Exit(1)
+				}
 				spoiled = append(spoiled, stor.Pastas[id])
+				// If it is a range (e.g. 3-4 or 3..4) use the i..j items
+			} else if l, r, found := tryParseRange(file); found {
+				// First ensure that the given string is not a file. Files have precedence
+				if pasta, ok := stor.Get(file); ok {
+					spoiled = append(spoiled, pasta)
+				} else {
+					// Assume it's a range
+					if l < 0 {
+						fmt.Fprintf(os.Stderr, "Pasta index %d out of range\n", l)
+						os.Exit(1)
+					}
+					if r >= len(stor.Pastas) {
+						fmt.Fprintf(os.Stderr, "Pasta index %d out of range\n", r)
+						os.Exit(1)
+					}
+					for i := l; i <= r; i++ {
+						spoiled = append(spoiled, stor.Pastas[i])
+					}
+				}
 			} else {
 				if pasta, ok := stor.Get(file); ok {
 					spoiled = append(spoiled, pasta)
