@@ -105,6 +105,7 @@ func push(filename string, mime string, src io.Reader) (Pasta, error) {
 	if resp.StatusCode != 200 {
 		return pasta, fmt.Errorf("http status code: %d", resp.StatusCode)
 	}
+	pasta.Date = time.Now().Unix()
 	err = json.NewDecoder(resp.Body).Decode(&pasta)
 	if err != nil {
 		return pasta, err
@@ -222,7 +223,7 @@ func main() {
 		cf.RemoteHost = remote.URL
 	}
 	// Sanity checks
-	if strings.Index(cf.RemoteHost, "://") < 0 {
+	if !strings.Contains(cf.RemoteHost, "://") {
 		fmt.Fprintf(os.Stderr, "Invalid remote: %s\n", cf.RemoteHost)
 		os.Exit(1)
 	}
@@ -282,7 +283,6 @@ func main() {
 				f_name := getFilename(filename)
 				pasta, err := push(f_name, "", file)
 				pasta.Filename = f_name
-				pasta.Date = time.Now().Unix()
 				if err != nil {
 					fmt.Fprintf(os.Stderr, "%s\n", err)
 					os.Exit(1)
