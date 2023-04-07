@@ -108,5 +108,9 @@ grep 'Cleanup[[:space:]]*=' test_config.toml
 grep 'RequestDelay[[:space:]]*=' test_config.toml
 echo "test_config.toml has been successfully created"
 
+## Check the date handling of the pasta client
+## Ensure there are no 1970 entries in ls
+! ../pasta ls | grep '1970'
+../pasta ls | grep `date +"%Y-%m-%d"`
 
 echo "All good :-)"
