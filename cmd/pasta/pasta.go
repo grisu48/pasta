@@ -17,7 +17,7 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const VERSION = "0.7"
+const VERSION = "0.7.1"
 
 type Config struct {
 	RemoteHost  string       `toml:"RemoteHost"`
