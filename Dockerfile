@@ -1,9 +1,6 @@
-ARG ARCH=
-
-FROM ${ARCH}golang:buster AS build-env
+FROM registry.suse.com/bci/golang AS build-env
 WORKDIR /app
 ADD . /app
-#RUN apt-get update && apt-get upgrade -y
 RUN cd /app && make requirements && make pastad-static
 
 FROM scratch
