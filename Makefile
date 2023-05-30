@@ -22,9 +22,9 @@ test: pastad pasta
 	# TODO: This syntax is horrible :-)
 	bash -c 'cd test && ./test.sh'
 
-container-docker: Dockerfile pasta pastad
+container-docker: Containerfile pasta pastad
 	docker build . -t feldspaten.org/pasta
 
-container-podman: Dockerfile pasta pastad
+container-podman: Containerfile pasta pastad
 	podman build . -t feldspaten.org/pasta
 
