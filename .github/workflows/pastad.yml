@@ -15,7 +15,7 @@ jobs:
       - name: Setup go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.16'
+          go-version: '1.18'
       - name: Install requirements
         run: make requirements
       - name: Compile binaries
