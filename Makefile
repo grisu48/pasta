@@ -1,3 +1,6 @@
+MANIFEST="pasta-multiarch"
+IMAGE="codeberg.org/grisu48/pasta"
+
 default: all
 all: pasta pastad
 static: pasta-static pastad-static
@@ -22,9 +25,12 @@ test: pastad pasta
 	# TODO: This syntax is horrible :-)
 	bash -c 'cd test && ./test.sh'
 
-container-docker: Containerfile pasta pastad
-	docker build . -t feldspaten.org/pasta
+container:
+	#podman build . -t codeberg.org/grisu48/pasta
 
-container-podman: Containerfile pasta pastad
-	podman build . -t feldspaten.org/pasta
+	buildah manifest create "${MANIFEST}"
+	buildah build --arch amd64 --tag "${IMAGE}" --manifest "${MANIFEST}" .
+	buildah build --arch arm64 --tag "${IMAGE}" --manifest "${MANIFEST}" .
 
+container-push:
+	buildah manifest push --all "${MANIFEST}" "docker://${IMAGE}"
