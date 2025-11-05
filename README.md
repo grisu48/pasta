@@ -1,5 +1,7 @@
 ![Build status badge](https://github.com/grisu48/pasta/workflows/pastad/badge.svg)
 
+**This repository has been moved to [codeberg](https://codeberg.org/grisu48/pasta). It will stay here for the time being but I will empty it at some undefined point in the future**
+
 # pasta
 
 Stupid simple pastebin service written in go.
